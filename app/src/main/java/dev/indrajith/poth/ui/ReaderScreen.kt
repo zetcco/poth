@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
@@ -50,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
@@ -93,9 +95,11 @@ import dev.indrajith.poth.reader.PageSpec
 import dev.indrajith.poth.reader.Pages
 import dev.indrajith.poth.reader.Section
 import dev.indrajith.poth.reader.Zoom
+import dev.indrajith.poth.widget.ReadingWidget
 import java.io.IOException
 import kotlin.math.max
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import dev.indrajith.poth.reader.Page as BookPage
@@ -155,15 +159,32 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
     val clock = remember(bookId) {
         PageClock(bookId, record = { view -> graph.scope.launch(Dispatchers.IO) { graph.log.add(view) } })
     }
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { clock.pause() }
+    // When reading stops, the widget catches up (once the last page view is written).
+    val appContext = LocalContext.current.applicationContext
+    fun refreshWidget() = graph.scope.launch {
+        delay(1_000)
+        ReadingWidget.updateAll(appContext)
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        clock.pause()
+        refreshWidget()
+    }
     LifecycleEventEffect(Lifecycle.Event.ON_START) { clock.resume() }
-    DisposableEffect(clock) { onDispose { clock.stop() } }
+    DisposableEffect(clock) {
+        onDispose {
+            clock.stop()
+            refreshWidget()
+        }
+    }
 
     // The dictionary as this book sees it: its own entries, its shelf's, the library's.
     val dictionary = graph.dictionary
     val changes by dictionary.changes.collectAsStateWithLifecycle()
-    val entries by produceState(emptyList<Entry>(), changes) { value = withContext(Dispatchers.IO) { dictionary.entriesFor(bookId) } }
-    val shelf by produceState<Shelf?>(null, changes) { value = withContext(Dispatchers.IO) { dictionary.shelvesOf(bookId).firstOrNull() } }
+    val shelfChanges by graph.shelves.changes.collectAsStateWithLifecycle()
+    val entries by produceState(emptyList<Entry>(), changes, shelfChanges) {
+        value = withContext(Dispatchers.IO) { dictionary.entriesFor(bookId) }
+    }
+    val shelf by produceState<Shelf?>(null, shelfChanges) { value = withContext(Dispatchers.IO) { graph.shelves.of(bookId) } }
     val suggestedShelf = remember(bookId) { Words.suggestShelf(book.title, book.series) }
     val marker = remember(entries) { EntryMarker(entries) }
     var cardIds by remember { mutableStateOf(emptyList<Long>()) }
@@ -220,6 +241,14 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
             value = pages.map(counts)
         }
         val current = turner.shown?.page
+        // How far through the book, for the book list: once the pages are counted.
+        LaunchedEffect(map, current) {
+            val pageMap = map ?: return@LaunchedEffect
+            val page = current ?: return@LaunchedEffect
+            if (pageMap.total == 0) return@LaunchedEffect
+            val progress = (pageMap.number(page.spine, page.index) + 1).toDouble() / pageMap.total
+            graph.scope.launch(Dispatchers.IO) { graph.books.saveProgress(bookId, progress) }
+        }
         val section by produceState<Section?>(null, current) { value = current?.let { pages.sectionOf(it) } }
         val chapterPages by produceState(0, current?.spine) { value = current?.let { pages.of(it.spine).size } ?: 0 }
 
@@ -417,7 +446,7 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
                         original != null && original.id != 0L && edited.scope == original.scope -> original.scopeId
                         edited.scope == Scope.BOOK -> bookId
                         edited.scope == Scope.LIBRARY -> null
-                        else -> (dictionary.shelvesOf(bookId).firstOrNull() ?: dictionary.putOnShelf(bookId, newShelf ?: suggestedShelf)).id.toString()
+                        else -> (graph.shelves.of(bookId) ?: graph.shelves.put(bookId, newShelf ?: suggestedShelf)).id.toString()
                     }
                     dictionary.save(edited.copy(scopeId = scopeId), origin)
                 }
@@ -433,6 +462,11 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
 }
 
 private class Shown(val page: BookPage, val arrivedBy: String)
+
+// The strips of the side edges kept for turning pages: as wide as the back gesture's area, and as
+// tall as Android lets an app keep.
+private val EdgeWidth = 32.dp
+private val EdgeBand = 200.dp
 
 /** The page on screen, its neighbours, and how far a swipe has moved them. */
 @Stable
@@ -514,9 +548,21 @@ private fun PageTurner(
     }
     BackHandler(enabled = turner.zoom.zoomed) { scope.launch { turner.unzoom() } }
 
+    val edge = with(LocalDensity.current) { EdgeWidth.toPx() }
+    val band = with(LocalDensity.current) { EdgeBand.toPx() }
     Canvas(
         Modifier
             .fillMaxSize()
+            // A strip of each side edge is kept for turning pages instead of the back gesture.
+            // Android allows 200dp of each edge; it sits where the thumb is, just below the middle.
+            .systemGestureExclusion { coordinates ->
+                val top = coordinates.size.height * 0.6f - band / 2
+                Rect(0f, top, edge, top + band)
+            }
+            .systemGestureExclusion { coordinates ->
+                val top = coordinates.size.height * 0.6f - band / 2
+                Rect(coordinates.size.width - edge, top, coordinates.size.width.toFloat(), top + band)
+            }
             .pointerInput(turner, turner.zoom.zoomed) {
                 // Waiting for a second tap delays the first, so double tap is only on while zoomed.
                 fun onPage(at: Offset, handle: (BookPage, Float, Float) -> Unit) {

@@ -210,4 +210,27 @@ class EpubBookTest {
             )
         }
     }
+
+    @Test
+    fun findsTheCoverEachWayBooksSayIt() {
+        fun book(opfExtra: String, manifest: String, first: String = "<p>text</p>") = epub(
+            container("OEBPS/content.opf"),
+            "OEBPS/content.opf" to """
+                <package><metadata><title>T</title>$opfExtra</metadata>
+                  <manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/>$manifest</manifest>
+                  <spine><itemref idref="a"/></spine></package>
+            """.trimIndent(),
+            "OEBPS/a.xhtml" to first,
+        )
+        val epub3 = book("", """<item id="c" href="img/c.jpg" media-type="image/jpeg" properties="cover-image"/>""")
+        EpubBook.open(epub3).use { assertEquals("OEBPS/img/c.jpg", it.cover()) }
+
+        val epub2 = book("""<meta name="cover" content="cov"/>""", """<item id="cov" href="cover.jpeg" media-type="image/jpeg"/>""")
+        EpubBook.open(epub2).use { assertEquals("OEBPS/cover.jpeg", it.cover()) }
+
+        val titlePage = book("", "", """<html><body><svg><image width="486" height="751" xlink:href="../cover.jpeg"/></svg></body></html>""")
+        EpubBook.open(titlePage).use { assertEquals("cover.jpeg", it.cover()) }
+
+        EpubBook.open(book("", "")).use { assertEquals(null, it.cover()) }
+    }
 }

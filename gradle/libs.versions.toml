@@ -10,6 +10,8 @@ material3 = "1.5.0-rc01"
 activityCompose = "1.13.0"
 coreKtx = "1.19.1"
 lifecycle = "2.11.0"
+# The home-screen widget, as in ~/personal/projects/kriya/android.
+glance = "1.2.0"
 coroutines = "1.11.0"
 # EPUB files: container.xml, the OPF and the XHTML chapters. Looked up on 2026-11-16 from
 # Maven Central; 1.24.1 was two weeks old, so the previous release.
@@ -25,6 +27,7 @@ androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-ru
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
 compose-material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
 compose-ui = { module = "androidx.compose.ui:ui" }
+glance-appwidget = { module = "androidx.glance:glance-appwidget", version.ref = "glance" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 junit = { module = "junit:junit", version.ref = "junit" }

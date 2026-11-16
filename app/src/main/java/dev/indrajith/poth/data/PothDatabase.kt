@@ -128,6 +128,8 @@ class PothDatabase(context: Context, name: String? = "poth.db") :
                 """,
                 "CREATE INDEX entry_revisions_by_entry ON entry_revisions (entry_id, saved_at)",
             ),
+            // 4: how far through each book reading is, 0 to 1, for the book list. NULL until known.
+            listOf("ALTER TABLE books ADD COLUMN progress REAL"),
         )
     }
 }

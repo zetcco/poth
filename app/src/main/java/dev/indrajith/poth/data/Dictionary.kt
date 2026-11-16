@@ -30,19 +30,18 @@ data class Entry(
     val terms get() = listOf(headword) + aliases
 }
 
-data class Shelf(val id: Long, val name: String)
-
 /** Where an entry was saved from: the book being read and the place in it. */
 data class Origin(val bookId: String, val position: Position)
 
 /**
- * The dictionary and the shelves its entries can belong to. Every save also keeps the entry as
- * it was, with where it was saved from, so its history can be shown later. Call off the main thread.
+ * The dictionary. Every save also keeps the entry as it was, with where it was saved from, so its
+ * history can be shown later. Which shelf's entries a book sees is [Shelves]' business. Call off
+ * the main thread.
  */
 class Dictionary(private val db: PothDatabase, private val now: () -> Long = System::currentTimeMillis) {
     private val _changes = MutableStateFlow(0)
 
-    /** Goes up whenever an entry or a shelf changes. */
+    /** Goes up whenever an entry changes. */
     val changes: StateFlow<Int> = _changes
 
     /** The entries a book sees: its own, its shelves', the library's. The most specific first. */
@@ -98,36 +97,6 @@ class Dictionary(private val db: PothDatabase, private val now: () -> Long = Sys
     fun delete(id: Long) {
         db.writableDatabase.execSQL("DELETE FROM entries WHERE id = ?", arrayOf<Any?>(id))
         _changes.value++
-    }
-
-    fun shelves(): List<Shelf> =
-        db.readableDatabase.rawQuery("SELECT id, name FROM shelves ORDER BY name COLLATE NOCASE", null)
-            .use { cursor -> buildList { while (cursor.moveToNext()) add(Shelf(cursor.getLong(0), cursor.getString(1))) } }
-
-    fun shelvesOf(bookId: String): List<Shelf> = db.readableDatabase.rawQuery(
-        "SELECT s.id, s.name FROM shelves s JOIN book_shelves b ON b.shelf_id = s.id WHERE b.book_id = ? ORDER BY s.name COLLATE NOCASE",
-        arrayOf(bookId),
-    ).use { cursor -> buildList { while (cursor.moveToNext()) add(Shelf(cursor.getLong(0), cursor.getString(1))) } }
-
-    /**
-     * Puts the book on the shelf called [name], making the shelf if there is none by that name
-     * (ignoring case). For now a book is on one shelf, so this takes it off any other.
-     */
-    fun putOnShelf(bookId: String, name: String): Shelf {
-        val database = db.writableDatabase
-        database.beginTransaction()
-        try {
-            database.execSQL("INSERT OR IGNORE INTO shelves (name, created_at) VALUES (?, ?)", arrayOf<Any?>(name.trim(), now()))
-            val shelf = database.rawQuery("SELECT id, name FROM shelves WHERE name = ? COLLATE NOCASE", arrayOf(name.trim()))
-                .use { it.moveToFirst(); Shelf(it.getLong(0), it.getString(1)) }
-            database.execSQL("DELETE FROM book_shelves WHERE book_id = ?", arrayOf<Any?>(bookId))
-            database.execSQL("INSERT INTO book_shelves (book_id, shelf_id) VALUES (?, ?)", arrayOf<Any?>(bookId, shelf.id))
-            database.setTransactionSuccessful()
-            _changes.value++
-            return shelf
-        } finally {
-            database.endTransaction()
-        }
     }
 
     private companion object {

@@ -39,6 +39,7 @@ class EpubBook private constructor(
     val metadata: Metadata,
     val manifest: Map<String, ManifestItem>,
     val spine: List<SpineItem>,
+    private val coverId: String?, // from EPUB 2's <meta name="cover" content="…">
 ) : Closeable {
 
     // Some books spell a file's name in a different case in the OPF than in the zip.
@@ -51,6 +52,27 @@ class EpubBook private constructor(
         val entry = zip.getEntry(path) ?: byLowercasePath[path.lowercase()]
             ?: throw EpubException("The book is missing $path")
         return zip.getInputStream(entry).use { it.readBytes() }
+    }
+
+    /**
+     * The cover image's path: EPUB 3's cover-image, EPUB 2's cover meta, or else the first picture
+     * on the first page (a title page wrapping the cover). Null if there is none.
+     */
+    fun cover(): String? {
+        manifest.values.firstOrNull { "cover-image" in it.properties }?.let { return it.path }
+        coverId?.let(manifest::get)?.takeIf { it.mediaType.startsWith("image/") }?.let { return it.path }
+        val first = spine.firstOrNull { it.linear }?.item ?: return null
+        if (first.mediaType.startsWith("image/")) return first.path
+        val page = try {
+            html(first.path)
+        } catch (e: EpubException) {
+            return null
+        } catch (e: IOException) {
+            return null
+        }
+        val image = page.select("img[src], image").firstOrNull() ?: return null
+        val src = image.attr("src").ifEmpty { image.attr("xlink:href") }.ifEmpty { image.attr("href") }
+        return src.takeIf { it.isNotEmpty() }?.let { resolvePath(first.path.substringBeforeLast('/', ""), it) }
     }
 
     /** A chapter (or any XHTML entry), parsed leniently. The charset comes from the file itself. */
@@ -142,9 +164,10 @@ class EpubBook private constructor(
                     .mapNotNull { ref -> manifest[ref.attr("idref")]?.let { SpineItem(it, ref.attr("linear") != "no") } }
                 if (spine.isEmpty()) throw EpubException("its reading order is empty")
 
-                val metadata = opf.allNamed("metadata").firstOrNull()?.let(::metadata)
-                    ?: Metadata(file.nameWithoutExtension, emptyList(), null, null, null)
-                return EpubBook(zip, metadata, manifest, spine)
+                val metadataElement = opf.allNamed("metadata").firstOrNull()
+                val metadata = metadataElement?.let(::metadata) ?: Metadata(file.nameWithoutExtension, emptyList(), null, null, null)
+                val coverId = metadataElement?.childrenNamed("meta")?.firstOrNull { it.attr("name") == "cover" }?.attr("content")
+                return EpubBook(zip, metadata, manifest, spine, coverId?.takeIf { it.isNotEmpty() })
             } catch (e: Exception) {
                 zip.close()
                 throw e

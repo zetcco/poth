@@ -18,6 +18,7 @@ data class Book(
     val fileSize: Long,
     val addedAt: Long,
     val openedAt: Long?,
+    val progress: Double? = null, // 0 to 1; null until the book has been read with its pages counted
 )
 
 /** The books table. Every call reads or writes the disk: call them off the main thread. */
@@ -72,6 +73,11 @@ class Books(private val db: PothDatabase) {
         )
     }
 
+    fun saveProgress(id: String, progress: Double) {
+        db.writableDatabase.execSQL("UPDATE books SET progress = ? WHERE id = ?", arrayOf<Any?>(progress.coerceIn(0.0, 1.0), id))
+        load()
+    }
+
     fun markOpened(id: String, at: Long) {
         db.writableDatabase.execSQL("UPDATE books SET opened_at = ? WHERE id = ?", arrayOf<Any?>(at, id))
         load()
@@ -79,7 +85,7 @@ class Books(private val db: PothDatabase) {
 
     private companion object {
         const val COLUMNS =
-            "id, title, author, series, series_index, language, file_name, file_size, added_at, opened_at"
+            "id, title, author, series, series_index, language, file_name, file_size, added_at, opened_at, progress"
 
         fun Cursor.toBook() = Book(
             id = getString(0),
@@ -92,6 +98,7 @@ class Books(private val db: PothDatabase) {
             fileSize = getLong(7),
             addedAt = getLong(8),
             openedAt = if (isNull(9)) null else getLong(9),
+            progress = if (isNull(10)) null else getDouble(10),
         )
     }
 }

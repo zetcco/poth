@@ -5,12 +5,14 @@ import android.content.Context
 import dev.indrajith.poth.actions.QuickActions
 import dev.indrajith.poth.data.BookFiles
 import dev.indrajith.poth.data.BookImporter
+import dev.indrajith.poth.data.Covers
 import dev.indrajith.poth.data.Dictionary
 import dev.indrajith.poth.data.PageCounts
 import dev.indrajith.poth.data.Books
 import dev.indrajith.poth.data.PothDatabase
 import dev.indrajith.poth.data.Prefs
 import dev.indrajith.poth.data.ReadingLog
+import dev.indrajith.poth.data.Shelves
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +31,8 @@ class Graph(
     val prefs: Prefs,
     val dictionary: Dictionary,
     val quickActions: QuickActions,
+    val shelves: Shelves,
+    val covers: Covers,
 )
 
 interface GraphOwner {
@@ -58,6 +62,8 @@ class PothApp : Application(), GraphOwner {
             prefs = Prefs(this),
             dictionary = Dictionary(db),
             quickActions = QuickActions(this),
+            shelves = Shelves(db),
+            covers = Covers(File(filesDir, "covers")),
         )
         scope.launch(Dispatchers.IO) { books.load() }
     }

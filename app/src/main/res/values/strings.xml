@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Poth</string>
+    <string name="widget_name">Reading days</string>
+    <string name="widget_description">Minutes read today, the streak, and a calendar of reading days.</string>
 </resources>
