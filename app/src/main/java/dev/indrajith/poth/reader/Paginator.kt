@@ -158,9 +158,8 @@ private class TextSlice(
             val start = max(mark.start, layout.getLineStart(line))
             val end = min(mark.end, lineEnd)
             if (start >= end) continue
-            val x0 = layout.getPrimaryHorizontal(start)
-            // A word broken by a hyphen runs to the line's end.
-            val x1 = if (end >= lineEnd) layout.getLineRight(line) else layout.getPrimaryHorizontal(end)
+            val x0 = horizontal(line, start)
+            val x1 = horizontal(line, end)
             val baseline = layout.getLineBaseline(line) + below
             canvas.drawLine(x0, baseline, x1, baseline, paint)
         }
@@ -171,9 +170,9 @@ private class TextSlice(
         if (py < y || py > y + layout.getLineBottom(endLine - 1) - top) return null
         val line = layout.getLineForVertical((py - y + top).toInt()).coerceIn(firstLine, endLine - 1)
         val lx = px - x
-        if (lx < layout.getLineLeft(line) || lx > layout.getLineRight(line)) return null
+        if (lx < horizontal(line, layout.getLineStart(line)) || lx > horizontal(line, visibleEnd(line))) return null
         val text = layout.text
-        val token = Words.at(text, layout.getOffsetForHorizontal(line, lx)) ?: return null
+        val token = Words.at(text, offsetAt(line, lx)) ?: return null
         val marks = marks(marker).filter { it.start < token.end && it.end > token.start }
         val start = marks.minOfOrNull { it.start } ?: token.start
         val end = marks.maxOfOrNull { it.end } ?: token.end
@@ -188,6 +187,70 @@ private class TextSlice(
     }
 
     fun text(): String = layout.text.subSequence(from, to).toString()
+
+    // Android draws a justified line with its spaces widened, but getPrimaryHorizontal and
+    // getOffsetForHorizontal measure it as if they were not, so anything placed by them drifts
+    // left along the line. On justified lines, a position here is getPrimaryHorizontal's plus the
+    // extra each space before it was given to fill the line. Should a later Android measure the
+    // widened spaces itself, the extra comes out as nothing.
+
+    private class Justified(val start: Int, val end: Int, val extraPerSpace: Float)
+
+    private val justified = HashMap<Int, Justified?>()
+
+    private fun justified(line: Int): Justified? = justified.getOrPut(line) {
+        val text = layout.text
+        val lineEnd = layout.getLineEnd(line)
+        val isJustified = layout.justificationMode == LineBreaker.JUSTIFICATION_MODE_INTER_WORD &&
+            lineEnd < text.length && text[lineEnd - 1] != '\n' && // a paragraph's last line is not justified
+            layout.getParagraphDirection(line) == Layout.DIR_LEFT_TO_RIGHT
+        if (!isJustified) return@getOrPut null
+        val start = layout.getLineStart(line)
+        val end = visibleEnd(line)
+        val spaces = (start until end).count { text[it] == ' ' }
+        if (spaces == 0) return@getOrPut null
+        // A word broken across lines (letters on both sides of the break) has a hyphen drawn after it.
+        val broken = end == lineEnd && end > start && text[end - 1].isLetter() && text[lineEnd].isLetter()
+        val hyphen = if (broken) layout.paint.measureText("-") else 0f
+        val shortBy = layout.getParagraphRight(line) - (measured(line, end) + hyphen)
+        Justified(start, end, (shortBy / spaces).coerceAtLeast(0f))
+    }
+
+    /** Where [offset] is drawn on [line]. */
+    private fun horizontal(line: Int, offset: Int): Float {
+        val at = offset.coerceIn(layout.getLineStart(line), visibleEnd(line))
+        val justified = justified(line) ?: return measured(line, at)
+        val spaces = (justified.start until at).count { layout.text[it] == ' ' }
+        return measured(line, at) + justified.extraPerSpace * spaces
+    }
+
+    /** getPrimaryHorizontal, except at a line's very end, which it would take for the next line's start. */
+    private fun measured(line: Int, offset: Int): Float =
+        if (offset < layout.getLineEnd(line) || offset == layout.getLineStart(line)) {
+            layout.getPrimaryHorizontal(offset)
+        } else {
+            layout.getPrimaryHorizontal(offset - 1) + layout.paint.measureText(layout.text, offset - 1, offset)
+        }
+
+    /** The offset on [line] drawn nearest to [x]. */
+    private fun offsetAt(line: Int, x: Float): Int {
+        val justified = justified(line) ?: return layout.getOffsetForHorizontal(line, x)
+        var low = justified.start
+        var high = justified.end
+        while (low < high) { // the last offset drawn at or left of x
+            val middle = (low + high + 1) / 2
+            if (horizontal(line, middle) <= x) low = middle else high = middle - 1
+        }
+        return if (low < justified.end && x - horizontal(line, low) > horizontal(line, low + 1) - x) low + 1 else low
+    }
+
+    /** The end of [line]'s text, without the spaces it ends with. */
+    private fun visibleEnd(line: Int): Int {
+        val start = layout.getLineStart(line)
+        var end = layout.getLineEnd(line)
+        while (end > start && layout.text[end - 1].isWhitespace()) end--
+        return end
+    }
 }
 
 private class ImageItem(val bitmap: Bitmap?, val rect: RectF) : PageItem {
