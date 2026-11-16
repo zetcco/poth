@@ -4,6 +4,7 @@ import android.content.pm.ActivityInfo
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -20,7 +21,6 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -30,7 +30,7 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
-import androidx.compose.foundation.systemGestureExclusion
+import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
@@ -51,12 +51,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
+import androidx.compose.ui.input.pointer.PointerId
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalContext
@@ -94,6 +103,7 @@ import dev.indrajith.poth.reader.PageMap
 import dev.indrajith.poth.reader.PageSpec
 import dev.indrajith.poth.reader.Pages
 import dev.indrajith.poth.reader.Section
+import dev.indrajith.poth.reader.Swipe
 import dev.indrajith.poth.reader.Zoom
 import dev.indrajith.poth.widget.ReadingWidget
 import java.io.IOException
@@ -463,10 +473,16 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
 
 private class Shown(val page: BookPage, val arrivedBy: String)
 
-// The strips of the side edges kept for turning pages: as wide as the back gesture's area, and as
-// tall as Android lets an app keep.
+// A swipe that starts this close to a side edge goes back instead of turning the page: the blank
+// margin beside the text. It is wider than Android's own back strip when Back sensitivity is
+// low (18dp at the lowest setting), so a swipe from the edge goes back either way.
 private val EdgeWidth = 32.dp
-private val EdgeBand = 200.dp
+
+// How far in from the edge a swipe has to come before it goes back.
+private val BackDistance = 40.dp
+
+/** A swipe from a side edge on its way to going back, [progress] 1 or more once it will. */
+private class EdgePull(val left: Boolean, val y: Float, val progress: Float)
 
 /** The page on screen, its neighbours, and how far a swipe has moved them. */
 @Stable
@@ -476,6 +492,7 @@ private class Turner(val pages: Pages) {
     var next by mutableStateOf<BookPage?>(null)
     var previous by mutableStateOf<BookPage?>(null)
     val offset = Animatable(0f)
+    var pull by mutableStateOf<EdgePull?>(null)
 
     var zoom by mutableStateOf(Zoom())
 
@@ -507,10 +524,11 @@ private class Turner(val pages: Pages) {
 }
 
 /**
- * Draws [turner]'s page and turns it by swiping: the next or previous page slides in, and a
- * short or slow swipe springs back. Two fingers zoom the page; while it is zoomed, one finger
- * moves it instead of turning, and a double tap or Back zooms out. Taps and long presses are
- * handed on with the point on the page, zoom taken into account.
+ * Draws [turner]'s page and turns it by swiping sideways: the next or previous page slides in,
+ * and a short or slow swipe springs back. A swipe up or down turns nothing, and a swipe in from
+ * a side edge goes back. Two fingers zoom the page; while it is zoomed, one finger moves it
+ * instead of turning, and a double tap or Back zooms out. Taps and long presses are handed on
+ * with the point on the page, zoom taken into account.
  * [onShow] hears about every page that settles on screen.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -548,21 +566,21 @@ private fun PageTurner(
     }
     BackHandler(enabled = turner.zoom.zoomed) { scope.launch { turner.unzoom() } }
 
-    val edge = with(LocalDensity.current) { EdgeWidth.toPx() }
-    val band = with(LocalDensity.current) { EdgeBand.toPx() }
+    val density = LocalDensity.current
+    val direction = LocalLayoutDirection.current
+    val gestures = WindowInsets.systemGestures
+    val minEdge = with(density) { EdgeWidth.toPx() }
+    val edgeLeft by rememberUpdatedState(max(gestures.getLeft(density, direction).toFloat(), minEdge))
+    val edgeRight by rememberUpdatedState(max(gestures.getRight(density, direction).toFloat(), minEdge))
+    val backDistance = with(density) { BackDistance.toPx() }
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+    val goBack by rememberUpdatedState { backDispatcher?.onBackPressed() }
+    val haptics = LocalHapticFeedback.current
+    val pullFill = MaterialTheme.colorScheme.secondaryContainer
+    val pullArrow = MaterialTheme.colorScheme.onSecondaryContainer
     Canvas(
         Modifier
             .fillMaxSize()
-            // A strip of each side edge is kept for turning pages instead of the back gesture.
-            // Android allows 200dp of each edge; it sits where the thumb is, just below the middle.
-            .systemGestureExclusion { coordinates ->
-                val top = coordinates.size.height * 0.6f - band / 2
-                Rect(0f, top, edge, top + band)
-            }
-            .systemGestureExclusion { coordinates ->
-                val top = coordinates.size.height * 0.6f - band / 2
-                Rect(coordinates.size.width - edge, top, coordinates.size.width.toFloat(), top + band)
-            }
             .pointerInput(turner, turner.zoom.zoomed) {
                 // Waiting for a second tap delays the first, so double tap is only on while zoomed.
                 fun onPage(at: Offset, handle: (BookPage, Float, Float) -> Unit) {
@@ -579,28 +597,62 @@ private fun PageTurner(
             .pointerInput(turner) {
                 val tracker = VelocityTracker()
                 val width = size.width.toFloat()
-                detectHorizontalDragGestures(
-                    onDragStart = { tracker.resetTracking() },
-                    onDragEnd = {
-                        val velocity = tracker.calculateVelocity().x
-                        val offset = turner.offset.value
-                        val forward = when {
-                            velocity < -flingSpeed || (velocity <= 0 && offset < -width / 4) -> true
-                            velocity > flingSpeed || (velocity >= 0 && offset > width / 4) -> false
-                            else -> null
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    // Which way it goes is read once the finger has moved past the touch slop.
+                    val moved = awaitSlop(down.id) ?: return@awaitEachGesture
+                    when {
+                        // Up or down: not a page turn, and not a tap either.
+                        !Swipe.sideways(moved.x, moved.y) -> follow(down.id) {}
+                        down.position.x < edgeLeft || down.position.x > width - edgeRight -> {
+                            // In from a side edge: back, with an arrow at the edge until it lets go.
+                            val left = down.position.x < edgeLeft
+                            var inward = if (left) moved.x else -moved.x
+                            var drift = moved.y
+                            var armed = false
+                            fun pull(y: Float) {
+                                val progress = inward / backDistance
+                                turner.pull = EdgePull(left, y, progress)
+                                val ready = Swipe.back(inward, drift, backDistance)
+                                if (ready && !armed) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                                armed = ready
+                            }
+                            pull(down.position.y)
+                            val lifted = follow(down.id) { change ->
+                                val delta = change.positionChange()
+                                inward += if (left) delta.x else -delta.x
+                                drift += delta.y
+                                pull(change.position.y)
+                            }
+                            turner.pull = null
+                            if (lifted && Swipe.back(inward, drift, backDistance)) goBack()
                         }
-                        scope.launch { turner.settle(forward, width) }
-                    },
-                    onDragCancel = { scope.launch { turner.settle(null, width) } },
-                    onHorizontalDrag = { change, dragAmount ->
-                        change.consume()
-                        tracker.addPosition(change.uptimeMillis, change.position)
-                        // Past the first or last page it only gives a little.
-                        val min = if (turner.next != null) -width else -width / 10
-                        val max = if (turner.previous != null) width else width / 10
-                        scope.launch { turner.offset.snapTo((turner.offset.value + dragAmount).coerceIn(min, max)) }
-                    },
-                )
+                        else -> {
+                            tracker.resetTracking()
+                            tracker.addPosition(down.uptimeMillis, down.position)
+                            var total = moved
+                            var shift = turner.offset.value
+                            val lifted = follow(down.id) { change ->
+                                val delta = change.positionChange()
+                                total += delta
+                                tracker.addPosition(change.uptimeMillis, change.position)
+                                // Past the first or last page it only gives a little.
+                                val min = if (turner.next != null) -width else -width / 10
+                                val max = if (turner.previous != null) width else width / 10
+                                shift = (shift + delta.x).coerceIn(min, max)
+                                val to = shift
+                                scope.launch { turner.offset.snapTo(to) }
+                            }
+                            val forward = if (lifted) {
+                                val velocity = tracker.calculateVelocity()
+                                Swipe.turn(total.x, total.y, velocity.x, velocity.y, shift, width, flingSpeed)
+                            } else {
+                                null
+                            }
+                            scope.launch { turner.settle(forward, width) }
+                        }
+                    }
+                }
             }
             // Last in the chain, so it sees moves first: what it takes for zooming and panning
             // never reaches the swipe above.
@@ -642,7 +694,71 @@ private fun PageTurner(
             if (dx < 0) draw(turner.next, dx + size.width) else if (dx > 0) draw(turner.previous, dx - size.width)
             native.restore()
         }
+        turner.pull?.let { drawPull(it, pullFill, pullArrow) }
     }
+}
+
+/**
+ * Waits for finger [id] to move past the touch slop and returns how far it went, taking that
+ * move so it isn't also a tap. Null if it lifted first (a tap or a long press), a second finger
+ * came down, or zooming took the move.
+ */
+private suspend fun AwaitPointerEventScope.awaitSlop(id: PointerId): Offset? {
+    var moved = Offset.Zero
+    while (true) {
+        val event = awaitPointerEvent()
+        val change = event.changes.firstOrNull { it.id == id } ?: return null
+        if (!change.pressed || change.isConsumed || event.changes.count { it.pressed } > 1) return null
+        moved += change.positionChange()
+        if (moved.getDistance() >= viewConfiguration.touchSlop) {
+            change.consume()
+            return moved
+        }
+    }
+}
+
+/**
+ * Follows finger [id] until it lifts, handing each move to [onMove] and taking it. Returns true
+ * if it lifted, false if the swipe was cut short: a second finger came down, zooming took the
+ * move, or the system took the gesture.
+ */
+private suspend fun AwaitPointerEventScope.follow(id: PointerId, onMove: (PointerInputChange) -> Unit): Boolean {
+    while (true) {
+        val event = awaitPointerEvent()
+        val change = event.changes.firstOrNull { it.id == id } ?: return false
+        // A cancelled gesture arrives as a lift that is already taken.
+        if (change.isConsumed) return false
+        if (!change.pressed) return true
+        if (event.changes.count { it.pressed } > 1) return false
+        onMove(change)
+        change.consume()
+    }
+}
+
+/** The arrow at a side edge while a swipe from it is on its way to going back. */
+private fun DrawScope.drawPull(pull: EdgePull, fill: Color, arrow: Color) {
+    val radius = 20.dp.toPx()
+    val reach = pull.progress.coerceIn(0f, 1f)
+    val ready = pull.progress >= 1f
+    // Slides out from behind the edge as the swipe comes in.
+    val fromEdge = -radius + reach * (radius + 18.dp.toPx())
+    val x = if (pull.left) fromEdge else size.width - fromEdge
+    val center = Offset(x, pull.y)
+    drawCircle(fill.copy(alpha = if (ready) 1f else 0.6f), radius, center)
+    // Points back at the edge it came from.
+    val point = if (pull.left) -1f else 1f
+    val half = 4.dp.toPx()
+    val tall = 7.dp.toPx()
+    val chevron = Path().apply {
+        moveTo(x - point * half, center.y - tall)
+        lineTo(x + point * half, center.y)
+        lineTo(x - point * half, center.y + tall)
+    }
+    drawPath(
+        chevron,
+        arrow.copy(alpha = if (ready) 1f else 0.6f),
+        style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+    )
 }
 
 /**
