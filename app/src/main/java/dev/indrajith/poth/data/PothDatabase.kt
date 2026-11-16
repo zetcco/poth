@@ -93,6 +93,41 @@ class PothDatabase(context: Context, name: String? = "poth.db") :
                 )
                 """,
             ),
+            // 3: the dictionary. An entry is a headword, other ways of writing it (one per line)
+            // and notes in Markdown, seen by one book, one shelf's books, or all books (the
+            // library, scope_id NULL). Every save is also kept as a revision, with the book and
+            // place being read at the time, for showing later where each part was written.
+            listOf(
+                """
+                CREATE TABLE entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    headword TEXT NOT NULL,
+                    aliases TEXT NOT NULL DEFAULT '',
+                    body TEXT NOT NULL DEFAULT '',
+                    scope TEXT NOT NULL,
+                    scope_id TEXT,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )
+                """,
+                "CREATE INDEX entries_by_scope ON entries (scope, scope_id)",
+                """
+                CREATE TABLE entry_revisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entry_id INTEGER NOT NULL REFERENCES entries (id) ON DELETE CASCADE,
+                    headword TEXT NOT NULL,
+                    aliases TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    scope TEXT NOT NULL,
+                    scope_id TEXT,
+                    saved_at INTEGER NOT NULL,
+                    book_id TEXT,
+                    spine_index INTEGER,
+                    position_char INTEGER
+                )
+                """,
+                "CREATE INDEX entry_revisions_by_entry ON entry_revisions (entry_id, saved_at)",
+            ),
         )
     }
 }

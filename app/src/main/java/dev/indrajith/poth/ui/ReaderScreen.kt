@@ -43,6 +43,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -51,10 +52,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -65,11 +68,19 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.indrajith.poth.Graph
+import dev.indrajith.poth.data.Entry
+import dev.indrajith.poth.data.Origin
 import dev.indrajith.poth.data.Position
+import dev.indrajith.poth.data.Scope
+import dev.indrajith.poth.data.Shelf
+import dev.indrajith.poth.dictionary.EntryMarker
+import dev.indrajith.poth.dictionary.Words
 import dev.indrajith.poth.epub.EpubBook
 import dev.indrajith.poth.epub.EpubException
 import dev.indrajith.poth.reader.Arrival
+import dev.indrajith.poth.reader.Marker
 import dev.indrajith.poth.reader.OpenBook
 import dev.indrajith.poth.reader.PageClock
 import dev.indrajith.poth.reader.PageMap
@@ -142,7 +153,19 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { clock.pause() }
     LifecycleEventEffect(Lifecycle.Event.ON_START) { clock.resume() }
     DisposableEffect(clock) { onDispose { clock.stop() } }
-    SystemBars(visible = barsVisible || contentsOpen)
+
+    // The dictionary as this book sees it: its own entries, its shelf's, the library's.
+    val dictionary = graph.dictionary
+    val changes by dictionary.changes.collectAsStateWithLifecycle()
+    val entries by produceState(emptyList<Entry>(), changes) { value = withContext(Dispatchers.IO) { dictionary.entriesFor(bookId) } }
+    val shelf by produceState<Shelf?>(null, changes) { value = withContext(Dispatchers.IO) { dictionary.shelvesOf(bookId).firstOrNull() } }
+    val suggestedShelf = remember(bookId) { Words.suggestShelf(book.title, book.series) }
+    val marker = remember(entries) { EntryMarker(entries) }
+    var cardIds by remember { mutableStateOf(emptyList<Long>()) }
+    var editing by remember { mutableStateOf<Entry?>(null) }
+    val haptics = LocalHapticFeedback.current
+
+    SystemBars(visible = barsVisible || contentsOpen || editing != null)
     RotationLock(rotationLocked)
 
     val density = LocalDensity.current
@@ -200,11 +223,36 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
 
         PageTurner(
             turner = turner,
+            marker = marker,
             pageLeft = left.toFloat(),
             pageTop = top.toFloat(),
-            onTap = {
-                barsVisible = !barsVisible
-                if (!barsVisible) jumpedFrom = null
+            onTap = { page, x, y ->
+                // An underlined word opens its entries; anywhere else shows or hides the bars.
+                val hit = page.wordAt(x, y, marker)
+                if (hit != null && hit.marks.isNotEmpty()) {
+                    cardIds = hit.marks.flatMap { it.entries }.distinct()
+                } else {
+                    barsVisible = !barsVisible
+                    if (!barsVisible) jumpedFrom = null
+                }
+            },
+            onLongPress = { page, x, y ->
+                // Holding a word writes about it: its entry if it has one, a new one if not.
+                val hit = page.wordAt(x, y, marker) ?: return@PageTurner
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                val existing = entries.firstOrNull { entry -> hit.marks.any { entry.id in it.entries } }
+                if (existing != null) {
+                    editing = existing
+                } else {
+                    scope.launch {
+                        val lowercaseElsewhere = withContext(Dispatchers.Default) {
+                            val word = Regex("\\b${Regex.escape(hit.word.lowercase())}\\b")
+                            pages.of(page.spine).any { word.containsMatchIn(it.text()) }
+                        }
+                        val guess = Words.suggestScope(hit.word, hit.startsSentence, lowercaseElsewhere, shelf != null || suggestedShelf.isNotEmpty())
+                        editing = Entry(headword = Words.headword(hit.word, guess), scope = guess)
+                    }
+                }
             },
             onShow = { page, arrivedBy ->
                 laidOutBefore = true
@@ -294,6 +342,62 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
                 onClose = { contentsOpen = false },
             )
         }
+
+        EntryCard(
+            entries = entries.filter { it.id in cardIds },
+            scopeLabel = { entry ->
+                when (entry.scope) {
+                    Scope.BOOK -> "This book"
+                    Scope.SHELF -> shelf?.name ?: "Shelf"
+                    Scope.LIBRARY -> "Library"
+                }
+            },
+            onEdit = { entry ->
+                cardIds = emptyList()
+                editing = entry
+            },
+            onAddAnother = { entry ->
+                cardIds = emptyList()
+                val other = if (entry.scope == Scope.LIBRARY) (if (shelf != null || suggestedShelf.isNotEmpty()) Scope.SHELF else Scope.BOOK) else Scope.LIBRARY
+                editing = Entry(headword = entry.headword, scope = other)
+            },
+            onEntryLink = { target ->
+                val ids = marker.matcher.lookup(target)
+                if (ids.isNotEmpty()) {
+                    cardIds = ids
+                } else {
+                    cardIds = emptyList()
+                    val guess = Words.suggestScope(target, startsSentence = false, appearsInLowercase = false, onShelf = shelf != null || suggestedShelf.isNotEmpty())
+                    editing = Entry(headword = target, scope = guess)
+                }
+            },
+            onClose = { cardIds = emptyList() },
+        )
+        EntryEditor(
+            entry = editing,
+            shelfName = shelf?.name,
+            suggestedShelf = suggestedShelf,
+            onSave = { edited, newShelf ->
+                val original = editing
+                editing = null
+                val origin = Origin(bookId, position)
+                graph.scope.launch(Dispatchers.IO) {
+                    // A moved entry goes to this book, this book's shelf, or the library.
+                    val scopeId = when {
+                        original != null && original.id != 0L && edited.scope == original.scope -> original.scopeId
+                        edited.scope == Scope.BOOK -> bookId
+                        edited.scope == Scope.LIBRARY -> null
+                        else -> (dictionary.shelvesOf(bookId).firstOrNull() ?: dictionary.putOnShelf(bookId, newShelf ?: suggestedShelf)).id.toString()
+                    }
+                    dictionary.save(edited.copy(scopeId = scopeId), origin)
+                }
+            },
+            onDelete = { entry ->
+                editing = null
+                graph.scope.launch(Dispatchers.IO) { dictionary.delete(entry.id) }
+            },
+            onClose = { editing = null },
+        )
     }
 }
 
@@ -340,21 +444,28 @@ private class Turner(val pages: Pages) {
 /**
  * Draws [turner]'s page and turns it by swiping: the next or previous page slides in, and a
  * short or slow swipe springs back. Two fingers zoom the page; while it is zoomed, one finger
- * moves it instead of turning, and a double tap or Back zooms out. A tap is handed to [onTap].
+ * moves it instead of turning, and a double tap or Back zooms out. Taps and long presses are
+ * handed on with the point on the page, zoom taken into account.
  * [onShow] hears about every page that settles on screen.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun PageTurner(
     turner: Turner,
+    marker: Marker,
     pageLeft: Float,
     pageTop: Float,
-    onTap: () -> Unit,
+    onTap: (page: BookPage, x: Float, y: Float) -> Unit,
+    onLongPress: (page: BookPage, x: Float, y: Float) -> Unit,
     onShow: (BookPage, String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val flingSpeed = with(LocalDensity.current) { 400.dp.toPx() } // per second
     val shown = turner.shown
+    // The gesture handlers below are set up once; these keep them calling the latest callbacks,
+    // which see the latest dictionary.
+    val tap by rememberUpdatedState(onTap)
+    val longPress by rememberUpdatedState(onLongPress)
 
     LaunchedEffect(shown) {
         if (shown == null) return@LaunchedEffect
@@ -377,9 +488,15 @@ private fun PageTurner(
             .fillMaxSize()
             .pointerInput(turner, turner.zoom.zoomed) {
                 // Waiting for a second tap delays the first, so double tap is only on while zoomed.
+                fun onPage(at: Offset, handle: (BookPage, Float, Float) -> Unit) {
+                    val page = turner.shown?.page ?: return
+                    val zoom = turner.zoom
+                    handle(page, (at.x - zoom.pan.x) / zoom.scale - pageLeft, (at.y - zoom.pan.y) / zoom.scale - pageTop)
+                }
                 detectTapGestures(
                     onDoubleTap = if (turner.zoom.zoomed) { _ -> scope.launch { turner.unzoom() } } else null,
-                    onTap = { onTap() },
+                    onLongPress = { onPage(it, longPress) },
+                    onTap = { onPage(it, tap) },
                 )
             }
             .pointerInput(turner) {
@@ -441,7 +558,7 @@ private fun PageTurner(
                 if (page == null) return
                 native.save()
                 native.translate(pageLeft + shift, pageTop)
-                page.draw(native)
+                page.draw(native, marker)
                 native.restore()
             }
             draw(turner.shown?.page, dx)

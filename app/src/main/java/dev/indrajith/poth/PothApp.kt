@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import dev.indrajith.poth.data.BookFiles
 import dev.indrajith.poth.data.BookImporter
+import dev.indrajith.poth.data.Dictionary
 import dev.indrajith.poth.data.PageCounts
 import dev.indrajith.poth.data.Books
 import dev.indrajith.poth.data.PothDatabase
@@ -25,6 +26,7 @@ class Graph(
     val log: ReadingLog,
     val pageCounts: PageCounts,
     val prefs: Prefs,
+    val dictionary: Dictionary,
 )
 
 interface GraphOwner {
@@ -52,6 +54,7 @@ class PothApp : Application(), GraphOwner {
             log = ReadingLog(db),
             pageCounts = PageCounts(db),
             prefs = Prefs(this),
+            dictionary = Dictionary(db),
         )
         scope.launch(Dispatchers.IO) { books.load() }
     }

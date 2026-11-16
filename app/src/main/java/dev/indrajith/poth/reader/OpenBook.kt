@@ -26,6 +26,7 @@ data class Section(val title: String, val depth: Int, val spine: Int, val fragme
 class OpenBook(private val epub: EpubBook) : Closeable {
     val title: String = epub.metadata.title
     val author: String = epub.metadata.authors.joinToString(", ")
+    val series: String? = epub.metadata.series
 
     /** The spine items read in order; non-linear ones (notes and the like) are left out. */
     val readingOrder: List<Int> = epub.spine.indices.filter { epub.spine[it].linear }

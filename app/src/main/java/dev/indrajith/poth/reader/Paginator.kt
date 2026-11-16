@@ -2,6 +2,7 @@ package dev.indrajith.poth.reader
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -19,6 +20,7 @@ import android.text.style.StyleSpan
 import android.text.style.SubscriptSpan
 import android.text.style.SuperscriptSpan
 import android.text.style.UnderlineSpan
+import dev.indrajith.poth.dictionary.Words
 import dev.indrajith.poth.epub.Align
 import dev.indrajith.poth.epub.Chapter
 import dev.indrajith.poth.epub.ImageBlock
@@ -47,6 +49,20 @@ data class PageSpec(
  */
 class DecodedImage(val bitmap: Bitmap?, val width: Int, val height: Int)
 
+/** A word to underline: [start] until [end] in a paragraph's text. [faint] for general words. */
+data class Mark(val start: Int, val end: Int, val faint: Boolean, val entries: List<Long>)
+
+/** Says which words of a paragraph's text, from [from] until [to], to underline. */
+fun interface Marker {
+    fun marks(text: CharSequence, from: Int, to: Int): List<Mark>
+}
+
+/**
+ * The word under a point on a page: [start] until [end] are offsets in the chapter, and [marks]
+ * the underlines on it. A term of several words ("Jasnah Kholin") is hit as a whole.
+ */
+class WordHit(val word: String, val start: Int, val end: Int, val startsSentence: Boolean, val marks: List<Mark>)
+
 /** One page of a chapter: [start] until [end] are character offsets in the chapter. */
 class Page(
     val spine: Int,
@@ -56,15 +72,39 @@ class Page(
     val words: Int,
     private val items: List<PageItem>,
 ) {
-    /** Draws the page with its top left corner at the canvas's origin. */
-    fun draw(canvas: Canvas) = items.forEach { it.draw(canvas) }
+    /** Draws the page with its top left corner at the canvas's origin, underlining what [marker] says. */
+    fun draw(canvas: Canvas, marker: Marker? = null) = items.forEach { it.draw(canvas, marker) }
+
+    /** The word at [x], [y] on the page, or null if there is no text there. */
+    fun wordAt(x: Float, y: Float, marker: Marker?): WordHit? =
+        items.firstNotNullOfOrNull { (it as? TextSlice)?.wordAt(x, y, marker) }
+
+    /** The page's text, a paragraph (or part of one) a line. */
+    fun text(): String = items.filterIsInstance<TextSlice>().joinToString("\n") { it.text() }
 }
 
 sealed interface PageItem {
-    fun draw(canvas: Canvas)
+    fun draw(canvas: Canvas, marker: Marker?)
 }
 
-/** Lines [firstLine] until [endLine] of a paragraph, placed at [x], [y] on the page. */
+/** The dashed underlines for dictionary words, in the text's colour. */
+private class MarkPaints(color: Int, fontPx: Float) {
+    val strong = paint(color, 0xC0, fontPx)
+    val faint = paint(color, 0x60, fontPx)
+
+    private fun paint(color: Int, alpha: Int, fontPx: Float) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color
+        this.alpha = alpha
+        style = Paint.Style.STROKE
+        strokeWidth = max(1f, fontPx / 16)
+        pathEffect = DashPathEffect(floatArrayOf(fontPx * 0.2f, fontPx * 0.12f), 0f)
+    }
+}
+
+/**
+ * Lines [firstLine] until [endLine] of a paragraph, placed at [x], [y] on the page. The
+ * paragraph starts at [blockStart] in the chapter.
+ */
 private class TextSlice(
     val layout: Layout,
     val firstLine: Int,
@@ -72,8 +112,26 @@ private class TextSlice(
     val x: Float,
     val y: Float,
     val pageWidth: Float,
+    val blockStart: Int,
+    val markPaints: MarkPaints,
 ) : PageItem {
-    override fun draw(canvas: Canvas) {
+    private val from get() = layout.getLineStart(firstLine)
+    private val to get() = layout.getLineEnd(endLine - 1)
+
+    // The marks are worked out the first time the slice is drawn with a marker, then kept.
+    private var marksOf: Marker? = null
+    private var marks: List<Mark> = emptyList()
+
+    private fun marks(marker: Marker?): List<Mark> {
+        if (marker == null) return emptyList()
+        if (marker !== marksOf) {
+            marks = marker.marks(layout.text, from, to)
+            marksOf = marker
+        }
+        return marks
+    }
+
+    override fun draw(canvas: Canvas, marker: Marker?) {
         val top = layout.getLineTop(firstLine).toFloat()
         val bottom = layout.getLineBottom(endLine - 1).toFloat()
         canvas.save()
@@ -81,18 +139,51 @@ private class TextSlice(
         // Layout.draw draws the lines the clip touches, so the clip picks this page's lines.
         canvas.clipRect(-x, top, pageWidth - x, bottom)
         layout.draw(canvas)
+        for (mark in marks(marker)) underline(canvas, mark)
         canvas.restore()
     }
+
+    private fun underline(canvas: Canvas, mark: Mark) {
+        val paint = if (mark.faint) markPaints.faint else markPaints.strong
+        val below = layout.paint.textSize * 0.2f
+        for (line in firstLine until endLine) {
+            val lineEnd = layout.getLineEnd(line)
+            val start = max(mark.start, layout.getLineStart(line))
+            val end = min(mark.end, lineEnd)
+            if (start >= end) continue
+            val x0 = layout.getPrimaryHorizontal(start)
+            // A word broken by a hyphen runs to the line's end.
+            val x1 = if (end >= lineEnd) layout.getLineRight(line) else layout.getPrimaryHorizontal(end)
+            val baseline = layout.getLineBaseline(line) + below
+            canvas.drawLine(x0, baseline, x1, baseline, paint)
+        }
+    }
+
+    fun wordAt(px: Float, py: Float, marker: Marker?): WordHit? {
+        val top = layout.getLineTop(firstLine)
+        if (py < y || py > y + layout.getLineBottom(endLine - 1) - top) return null
+        val line = layout.getLineForVertical((py - y + top).toInt()).coerceIn(firstLine, endLine - 1)
+        val lx = px - x
+        if (lx < layout.getLineLeft(line) || lx > layout.getLineRight(line)) return null
+        val text = layout.text
+        val token = Words.at(text, layout.getOffsetForHorizontal(line, lx)) ?: return null
+        val marks = marks(marker).filter { it.start < token.end && it.end > token.start }
+        val start = marks.minOfOrNull { it.start } ?: token.start
+        val end = marks.maxOfOrNull { it.end } ?: token.end
+        return WordHit(text.subSequence(start, end).toString(), blockStart + start, blockStart + end, Words.startsSentence(text, start), marks)
+    }
+
+    fun text(): String = layout.text.subSequence(from, to).toString()
 }
 
 private class ImageItem(val bitmap: Bitmap?, val rect: RectF) : PageItem {
-    override fun draw(canvas: Canvas) {
+    override fun draw(canvas: Canvas, marker: Marker?) {
         if (bitmap != null) canvas.drawBitmap(bitmap, null, rect, imagePaint)
     }
 }
 
 private class RuleItem(val x0: Float, val x1: Float, val y: Float, val paint: Paint) : PageItem {
-    override fun draw(canvas: Canvas) = canvas.drawLine(x0, y, x1, y, paint)
+    override fun draw(canvas: Canvas, marker: Marker?) = canvas.drawLine(x0, y, x1, y, paint)
 }
 
 private val imagePaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
@@ -106,6 +197,7 @@ class Paginator(
     private val locale: Locale,
     private val image: (path: String, maxWidth: Int, maxHeight: Int) -> DecodedImage?,
 ) {
+    private val markPaints = MarkPaints(spec.textColor, spec.fontPx)
     private val rulePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = spec.textColor
         alpha = 0x70
@@ -166,7 +258,7 @@ class Paginator(
                 end = line + 1 // a line taller than a page gets a page of its own
             }
             val words = countWords(layout.text, layout.getLineStart(line), layout.getLineEnd(end - 1))
-            sink.add(TextSlice(layout, line, end, x, top, spec.width.toFloat()), top + layout.getLineBottom(end - 1) - sliceTop, words)
+            sink.add(TextSlice(layout, line, end, x, top, spec.width.toFloat(), block.start, markPaints), top + layout.getLineBottom(end - 1) - sliceTop, words)
             line = end
             if (line < layout.lineCount) sink.breakPage(block.start + layout.getLineStart(line))
         }

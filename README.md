@@ -19,7 +19,9 @@ adb shell am start -n dev.indrajith.poth/.MainActivity
   book and its page cache (`OpenBook`, `Pages`), and timing pages on screen (`PageClock`).
 - `data/`: the SQLite database (`PothDatabase`), books and reading positions, the page-view log,
   importing a picked file.
-- `ui/`: Compose screens: the book list and the reader.
+- `dictionary/`: matching dictionary terms in text, guessing a new entry's scope, and the small
+  Markdown subset entries are written in. Plain Kotlin, tested on the JVM.
+- `ui/`: Compose screens: the book list, the reader, and the dictionary card and editor.
 
 A reading position is a spine index and a character offset in that chapter's text, so it does not
 change with the font size or the screen. Changing how chapters are parsed can shift offsets a little.
@@ -35,7 +37,7 @@ Built in iterations; each one ends with something usable on the phone.
 - [x] 1. Reader core: own page renderer, swipe to turn, position remembered, page views logged
 - [x] 2. Reader bars: title/section/page, "18 of 1789", part ticks, safe scrubber, contents
 - [x] 3. Pinch zoom (magnify without reflow)
-- [ ] 4. Dictionary: Markdown entries, Book/Shelf/Library scopes, underlines
+- [x] 4. Dictionary: Markdown entries, Book/Shelf/Library scopes, underlines
 - [ ] 5. Quick actions: look a word up in installed apps, prompt templates
 - [ ] 6. Reading stats (weighted at query time; quick glances don't count)
 - [ ] 7. Polish: search, font settings, `.md` export, backup
