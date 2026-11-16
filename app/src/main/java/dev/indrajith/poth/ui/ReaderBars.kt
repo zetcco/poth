@@ -1,17 +1,17 @@
 package dev.indrajith.poth.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.draw.clip
-import androidx.compose.material3.SheetValue
-import androidx.compose.material3.rememberBottomSheetState
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -20,13 +20,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.mandatorySystemGestures
 import androidx.compose.foundation.layout.navigationBarsIgnoringVisibility
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -34,18 +38,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -53,10 +57,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -262,57 +270,108 @@ private fun Scrubber(model: ScrubberModel, onDragging: (Int?) -> Unit) {
 }
 
 /**
- * The table of contents, full height and scrolled to where reading is. Parts read as headings,
- * what has been read is dimmed, and each entry shows its page once the book has been counted.
+ * The table of contents, as a panel that slides up over the page. It is built once while hidden
+ * and stays built, so opening it is only the slide; a bottom sheet makes a window of its own each
+ * time, which showed as a hitch. Full height and scrolled to where reading is; parts read as
+ * headings, what has been read is dimmed, and each entry shows its page once the book is counted.
+ * Closes with Back, a tap above it, or a drag down on its top.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun ContentsSheet(
+fun ContentsPanel(
+    open: Boolean,
     contents: List<Section>,
     current: Section?,
     pageOf: (Section) -> Int?,
     onPick: (Section) -> Unit,
-    onDismiss: () -> Unit,
+    onClose: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        // Hidden or fully open: no half-open stop.
-        sheetState = rememberBottomSheetState(SheetValue.Hidden, setOf(SheetValue.Hidden, SheetValue.Expanded)),
-        containerColor = colors.surfaceContainerLow,
-    ) {
-        Column(Modifier.padding(start = 24.dp, end = 24.dp, bottom = 12.dp)) {
-            Text("Contents", style = MaterialTheme.typography.headlineSmall)
-            if (current != null) {
-                Text(current.title, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+    val shown by animateFloatAsState(if (open) 1f else 0f, MaterialTheme.motionScheme.defaultSpatialSpec(), label = "contents")
+    val scrim by animateFloatAsState(if (open) 1f else 0f, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "scrim")
+    var dragged by remember { mutableFloatStateOf(0f) }
+    val dismissDistance = with(LocalDensity.current) { 120.dp.toPx() }
+    val currentIndex = contents.indexOf(current)
+    val list = rememberLazyListState()
+    LaunchedEffect(open) {
+        if (open) {
+            dragged = 0f
+            list.scrollToItem(max(0, currentIndex - 3))
         }
-        if (contents.isEmpty()) {
-            Text(
-                "This book has no table of contents.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = colors.onSurfaceVariant,
-                modifier = Modifier.padding(24.dp),
+    }
+    BackHandler(enabled = open, onBack = onClose)
+
+    Box(Modifier.fillMaxSize()) {
+        if (scrim > 0f) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = scrim }
+                    .background(colors.scrim.copy(alpha = 0.5f))
+                    .pointerInput(Unit) { detectTapGestures { onClose() } },
             )
-            return@ModalBottomSheet
         }
-        val currentIndex = contents.indexOf(current)
-        val topDepth = contents.minOf { it.depth }
-        val state = rememberLazyListState(initialFirstVisibleItemIndex = max(0, currentIndex - 3))
-        LazyColumn(
-            state = state,
-            contentPadding = WindowInsets.navigationBarsIgnoringVisibility.only(WindowInsetsSides.Bottom).asPaddingValues(),
+        Surface(
+            color = colors.surfaceContainerLow,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility.only(WindowInsetsSides.Top))
+                .padding(top = 8.dp)
+                // Hidden, it waits below the screen, where touches cannot reach it.
+                .graphicsLayer { translationY = ((1f - shown) * size.height + dragged).coerceAtLeast(0f) },
         ) {
-            itemsIndexed(contents) { index, section ->
-                ContentsRow(
-                    section = section,
-                    heading = contents.getOrNull(index + 1)?.let { it.depth > section.depth } == true,
-                    indent = section.depth - topDepth,
-                    isCurrent = index == currentIndex,
-                    read = index < currentIndex,
-                    page = pageOf(section),
-                    onClick = { onPick(section) },
-                )
+            Column {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .draggable(
+                            orientation = Orientation.Vertical,
+                            state = rememberDraggableState { delta -> dragged = (dragged + delta).coerceAtLeast(0f) },
+                            onDragStopped = { velocity ->
+                                if (dragged > dismissDistance || velocity > 1500f) onClose() else dragged = 0f
+                            },
+                        )
+                        .padding(start = 24.dp, end = 24.dp, bottom = 12.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .padding(vertical = 16.dp)
+                            .align(Alignment.CenterHorizontally)
+                            .size(width = 32.dp, height = 4.dp)
+                            .background(colors.onSurfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(2.dp)),
+                    )
+                    Text("Contents", style = MaterialTheme.typography.headlineSmall)
+                    if (current != null) {
+                        Text(current.title, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                if (contents.isEmpty()) {
+                    Text(
+                        "This book has no table of contents.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(24.dp),
+                    )
+                } else {
+                    val topDepth = contents.minOf { it.depth }
+                    LazyColumn(
+                        state = list,
+                        contentPadding = WindowInsets.navigationBarsIgnoringVisibility.only(WindowInsetsSides.Bottom).asPaddingValues(),
+                    ) {
+                        itemsIndexed(contents) { index, section ->
+                            ContentsRow(
+                                section = section,
+                                heading = contents.getOrNull(index + 1)?.let { it.depth > section.depth } == true,
+                                indent = section.depth - topDepth,
+                                isCurrent = index == currentIndex,
+                                read = index < currentIndex,
+                                page = pageOf(section),
+                                onClick = { onPick(section) },
+                            )
+                        }
+                    }
+                }
             }
         }
     }

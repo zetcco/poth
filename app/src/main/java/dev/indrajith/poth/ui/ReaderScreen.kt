@@ -1,10 +1,12 @@
 package dev.indrajith.poth.ui
 
 import android.content.pm.ActivityInfo
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -12,6 +14,11 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -40,16 +47,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.toSize
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -66,6 +76,7 @@ import dev.indrajith.poth.reader.PageMap
 import dev.indrajith.poth.reader.PageSpec
 import dev.indrajith.poth.reader.Pages
 import dev.indrajith.poth.reader.Section
+import dev.indrajith.poth.reader.Zoom
 import java.io.IOException
 import kotlin.math.max
 import kotlinx.coroutines.Dispatchers
@@ -267,16 +278,20 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
                 },
             )
         }
-        if (contentsOpen) {
-            ContentsSheet(
+        // Built once the first page is up, then kept, so opening it is only its slide.
+        if (current != null) {
+            val pageMap = map
+            val pageOf = remember(pageMap) { { section: Section -> pageMap?.number(section.spine, 0) } }
+            ContentsPanel(
+                open = contentsOpen,
                 contents = book.contents,
                 current = section,
-                pageOf = { section -> map?.number(section.spine, 0) },
+                pageOf = pageOf,
                 onPick = { picked ->
                     contentsOpen = false
                     jump { pages.at(picked) }
                 },
-                onDismiss = { contentsOpen = false },
+                onClose = { contentsOpen = false },
             )
         }
     }
@@ -293,9 +308,17 @@ private class Turner(val pages: Pages) {
     var previous by mutableStateOf<BookPage?>(null)
     val offset = Animatable(0f)
 
+    var zoom by mutableStateOf(Zoom())
+
     suspend fun show(page: BookPage, arrivedBy: String) {
         offset.snapTo(0f)
+        zoom = Zoom()
         shown = Shown(page, arrivedBy)
+    }
+
+    suspend fun unzoom() {
+        val from = zoom
+        animate(0f, 1f, animationSpec = tween(250, easing = FastOutSlowInEasing)) { t, _ -> zoom = from.towardsNone(t) }
     }
 
     /** Ends a swipe: on to the next or previous page, or back to where it was ([forward] null). */
@@ -316,8 +339,9 @@ private class Turner(val pages: Pages) {
 
 /**
  * Draws [turner]'s page and turns it by swiping: the next or previous page slides in, and a
- * short or slow swipe springs back. A tap is handed to [onTap]. [onShow] hears about every page
- * that settles on screen.
+ * short or slow swipe springs back. Two fingers zoom the page; while it is zoomed, one finger
+ * moves it instead of turning, and a double tap or Back zooms out. A tap is handed to [onTap].
+ * [onShow] hears about every page that settles on screen.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -346,11 +370,18 @@ private fun PageTurner(
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { LoadingIndicator() }
         return
     }
+    BackHandler(enabled = turner.zoom.zoomed) { scope.launch { turner.unzoom() } }
 
     Canvas(
         Modifier
             .fillMaxSize()
-            .pointerInput(turner) { detectTapGestures(onTap = { onTap() }) }
+            .pointerInput(turner, turner.zoom.zoomed) {
+                // Waiting for a second tap delays the first, so double tap is only on while zoomed.
+                detectTapGestures(
+                    onDoubleTap = if (turner.zoom.zoomed) { _ -> scope.launch { turner.unzoom() } } else null,
+                    onTap = { onTap() },
+                )
+            }
             .pointerInput(turner) {
                 val tracker = VelocityTracker()
                 val width = size.width.toFloat()
@@ -376,11 +407,36 @@ private fun PageTurner(
                         scope.launch { turner.offset.snapTo((turner.offset.value + dragAmount).coerceIn(min, max)) }
                     },
                 )
+            }
+            // Last in the chain, so it sees moves first: what it takes for zooming and panning
+            // never reaches the swipe above.
+            .pointerInput(turner) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    do {
+                        val event = awaitPointerEvent()
+                        val fingers = event.changes.count { it.pressed }
+                        if (fingers >= 2 || turner.zoom.zoomed && fingers == 1) {
+                            val factor = event.calculateZoom()
+                            val move = event.calculatePan()
+                            if (factor != 1f || move != Offset.Zero) {
+                                turner.zoom = turner.zoom.by(factor, move, event.calculateCentroid(useCurrent = true), size.toSize())
+                                event.changes.forEach { if (it.positionChanged()) it.consume() }
+                            }
+                        }
+                    } while (event.changes.any { it.pressed })
+                    turner.zoom = turner.zoom.settled()
+                }
             },
     ) {
         val dx = turner.offset.value
         drawIntoCanvas { canvas ->
             val native = canvas.nativeCanvas
+            // Drawn through the zoom rather than scaled afterwards, so text stays sharp.
+            native.save()
+            val zoom = turner.zoom
+            native.translate(zoom.pan.x, zoom.pan.y)
+            native.scale(zoom.scale, zoom.scale)
             fun draw(page: BookPage?, shift: Float) {
                 if (page == null) return
                 native.save()
@@ -390,6 +446,7 @@ private fun PageTurner(
             }
             draw(turner.shown?.page, dx)
             if (dx < 0) draw(turner.next, dx + size.width) else if (dx > 0) draw(turner.previous, dx - size.width)
+            native.restore()
         }
     }
 }

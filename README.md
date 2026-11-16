@@ -34,7 +34,7 @@ Built in iterations; each one ends with something usable on the phone.
 - [x] 0. Skeleton: database (books, shelves, page views), add an EPUB, see its text
 - [x] 1. Reader core: own page renderer, swipe to turn, position remembered, page views logged
 - [x] 2. Reader bars: title/section/page, "18 of 1789", part ticks, safe scrubber, contents
-- [ ] 3. Pinch zoom (magnify without reflow)
+- [x] 3. Pinch zoom (magnify without reflow)
 - [ ] 4. Dictionary: Markdown entries, Book/Shelf/Library scopes, underlines
 - [ ] 5. Quick actions: look a word up in installed apps, prompt templates
 - [ ] 6. Reading stats (weighted at query time; quick glances don't count)
