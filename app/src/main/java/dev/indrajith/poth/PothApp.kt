@@ -6,6 +6,7 @@ import dev.indrajith.poth.data.BookFiles
 import dev.indrajith.poth.data.BookImporter
 import dev.indrajith.poth.data.Books
 import dev.indrajith.poth.data.PothDatabase
+import dev.indrajith.poth.data.ReadingLog
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +20,7 @@ class Graph(
     val books: Books,
     val files: BookFiles,
     val importer: BookImporter,
+    val log: ReadingLog,
 )
 
 interface GraphOwner {
@@ -43,6 +45,7 @@ class PothApp : Application(), GraphOwner {
             books = books,
             files = files,
             importer = BookImporter(contentResolver, books, files),
+            log = ReadingLog(db),
         )
         scope.launch(Dispatchers.IO) { books.load() }
     }

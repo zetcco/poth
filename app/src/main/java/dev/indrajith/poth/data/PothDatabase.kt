@@ -75,7 +75,7 @@ class PothDatabase(context: Context, name: String? = "poth.db") :
                     start_char INTEGER NOT NULL,
                     end_char INTEGER NOT NULL,
                     words INTEGER NOT NULL,
-                    -- How the page was reached: 'open', 'next', 'previous' or 'jump'.
+                    -- How the page was reached: see reader.Arrival.
                     arrived_by TEXT NOT NULL
                 )
                 """,

@@ -13,9 +13,16 @@ adb shell am start -n dev.indrajith.poth/.MainActivity
 
 ## Layout
 
-- `epub/`: reading EPUB files: container, OPF (metadata, manifest, spine), chapters.
-- `data/`: the SQLite database (`PothDatabase`), the books table, importing a picked file.
+- `epub/`: reading EPUB files: container, OPF (metadata, manifest, spine), and each chapter's
+  XHTML and CSS into blocks of styled text (`ChapterParser`). Plain Kotlin, tested on the JVM.
+- `reader/`: laying chapters out in pages with Android's `StaticLayout` (`Paginator`), the open
+  book and its page cache (`OpenBook`, `Pages`), and timing pages on screen (`PageClock`).
+- `data/`: the SQLite database (`PothDatabase`), books and reading positions, the page-view log,
+  importing a picked file.
 - `ui/`: Compose screens: the book list and the reader.
+
+A reading position is a spine index and a character offset in that chapter's text, so it does not
+change with the font size or the screen. Changing how chapters are parsed can shift offsets a little.
 
 Books are copied into the app's storage when added and named by their SHA-256, which is also the
 book's ID: the same file added twice is one book.
@@ -25,7 +32,7 @@ book's ID: the same file added twice is one book.
 Built in iterations; each one ends with something usable on the phone.
 
 - [x] 0. Skeleton: database (books, shelves, page views), add an EPUB, see its text
-- [ ] 1. Reader core: own page renderer, swipe to turn, position remembered, page views logged
+- [x] 1. Reader core: own page renderer, swipe to turn, position remembered, page views logged
 - [ ] 2. Reader bars: title/section/page, "18 of 1789", chapter ticks, safe scrubber, contents
 - [ ] 3. Pinch zoom (magnify without reflow)
 - [ ] 4. Dictionary: Markdown entries, Book/Shelf/Library scopes, underlines

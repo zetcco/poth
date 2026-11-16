@@ -4,6 +4,9 @@ import android.database.Cursor
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
+/** Where reading is: a spine index and a character offset in that chapter. */
+data class Position(val spine: Int, val char: Int)
+
 data class Book(
     val id: String,             // SHA-256 of the EPUB file
     val title: String,
@@ -55,6 +58,18 @@ class Books(private val db: PothDatabase) {
             ),
         )
         load()
+    }
+
+    /** Where reading stopped; the start of the book if it has not been opened. */
+    fun position(id: String): Position =
+        db.readableDatabase.rawQuery("SELECT position_spine, position_char FROM books WHERE id = ?", arrayOf(id))
+            .use { cursor -> if (cursor.moveToFirst()) Position(cursor.getInt(0), cursor.getInt(1)) else Position(0, 0) }
+
+    fun savePosition(id: String, position: Position) {
+        db.writableDatabase.execSQL(
+            "UPDATE books SET position_spine = ?, position_char = ? WHERE id = ?",
+            arrayOf<Any?>(position.spine, position.char, id),
+        )
     }
 
     fun markOpened(id: String, at: Long) {

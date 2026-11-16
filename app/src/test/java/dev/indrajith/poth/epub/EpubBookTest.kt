@@ -3,7 +3,6 @@ package dev.indrajith.poth.epub
 import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
-import org.jsoup.Jsoup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Rule
@@ -77,7 +76,7 @@ class EpubBookTest {
             assertEquals(listOf(true, false, true), book.spine.map { it.linear })
             assertEquals("OEBPS/Images/cover.jpg", book.manifest.getValue("cover").path)
             assertEquals(setOf("cover-image"), book.manifest.getValue("cover").properties)
-            assertEquals(listOf("two"), PlainText.paragraphs(book.html(book.spine[2].item.path)))
+            assertEquals("two", book.html(book.spine[2].item.path).body().text())
         }
     }
 
@@ -121,7 +120,7 @@ class EpubBookTest {
         val file = epub(container("content.opf"), "content.opf" to opf, "Text/chapter.XHTML" to "<p>found</p>")
 
         EpubBook.open(file).use { book ->
-            assertEquals(listOf("found"), PlainText.paragraphs(book.html(book.spine[0].item.path)))
+            assertEquals("found", book.html(book.spine[0].item.path).body().text())
         }
     }
 
@@ -149,32 +148,5 @@ class EpubBookTest {
         assertEquals("Images/c.jpg", resolvePath("OEBPS/Text", "../../Images/c.jpg"))
         assertEquals("a+b.xhtml", resolvePath("", "a+b.xhtml"))
         assertEquals("x.xhtml", resolvePath("", "./x.xhtml#frag"))
-    }
-
-    @Test
-    fun plainTextSplitsBlocksAndKeepsInlineTextTogether() {
-        val chapter = Jsoup.parse(
-            """
-            <html><head><title>Not text</title></head><body>
-              <h1>SIX YEARS AGO</h1>
-              <div><p>Jasnah&nbsp;Kholin pretended to <i>enjoy</i>
-                 the party&mdash;giving&#8217;s   no indication.</p>
-                <p>   </p>
-                <div>Nested <b>div</b><br/>after a break</div>
-              </div>
-              Loose text at the end
-            </body></html>
-            """.trimIndent(),
-        )
-        assertEquals(
-            listOf(
-                "SIX YEARS AGO",
-                "Jasnah Kholin pretended to enjoy the party—giving’s no indication.",
-                "Nested div",
-                "after a break",
-                "Loose text at the end",
-            ),
-            PlainText.paragraphs(chapter),
-        )
     }
 }
