@@ -15,6 +15,8 @@ coroutines = "1.11.0"
 # Maven Central; 1.24.1 was two weeks old, so the previous release.
 jsoup = "1.23.2"
 junit = "4.13.2"
+# Android has org.json built in; JVM unit tests need the real thing.
+orgJson = "20251224"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -26,6 +28,7 @@ compose-ui = { module = "androidx.compose.ui:ui" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 junit = { module = "junit:junit", version.ref = "junit" }
+org-json = { module = "org.json:json", version.ref = "orgJson" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

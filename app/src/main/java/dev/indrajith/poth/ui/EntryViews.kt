@@ -8,6 +8,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,6 +41,7 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -47,9 +49,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -59,11 +63,21 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import dev.indrajith.poth.R
+import dev.indrajith.poth.actions.QuickAction
+import dev.indrajith.poth.actions.QuickActions
+import dev.indrajith.poth.data.Definition
 import dev.indrajith.poth.data.Entry
+import dev.indrajith.poth.data.Lookup
 import dev.indrajith.poth.data.Scope
+import dev.indrajith.poth.data.Wiktionary
+import kotlinx.coroutines.launch
 
 /**
  * The entries for a tapped word, the most specific first, over the bottom of the page. Shown
@@ -74,6 +88,10 @@ import dev.indrajith.poth.data.Scope
 fun EntryCard(
     entries: List<Entry>,
     scopeLabel: (Entry) -> String,
+    actions: List<QuickAction>,
+    actionStore: QuickActions,
+    onAction: (QuickAction) -> Unit,
+    onConfigureActions: () -> Unit,
     onEdit: (Entry) -> Unit,
     onAddAnother: (Entry) -> Unit,
     onEntryLink: (String) -> Unit,
@@ -117,6 +135,7 @@ fun EntryCard(
                         if (index > 0) HorizontalDivider(Modifier.padding(end = 12.dp))
                         EntryView(entry, scopeLabel(entry), onEdit = { onEdit(entry) }, onEntryLink = onEntryLink)
                     }
+                    QuickActionRow(actions, actionStore, onAction, onConfigureActions)
                     shown.firstOrNull()?.let { first ->
                         TextButton(onClick = { onAddAnother(first) }) { Text("Add another meaning") }
                     }
@@ -160,6 +179,11 @@ fun EntryEditor(
     entry: Entry?,
     shelfName: String?,
     suggestedShelf: String,
+    language: String,
+    actions: List<QuickAction>,
+    actionStore: QuickActions,
+    onAction: (QuickAction, word: String) -> Unit,
+    onConfigureActions: () -> Unit,
     onSave: (Entry, newShelf: String?) -> Unit,
     onDelete: (Entry) -> Unit,
     onClose: () -> Unit,
@@ -172,7 +196,7 @@ fun EntryEditor(
         exit = slideOutVertically { it / 4 } + fadeOut(),
     ) {
         val editing = shown ?: return@AnimatedVisibility
-        EditorContent(editing, shelfName, suggestedShelf, onSave, onDelete, onClose)
+        EditorContent(editing, shelfName, suggestedShelf, language, actions, actionStore, onAction, onConfigureActions, onSave, onDelete, onClose)
     }
 }
 
@@ -182,6 +206,11 @@ private fun EditorContent(
     entry: Entry,
     shelfName: String?,
     suggestedShelf: String,
+    language: String,
+    actions: List<QuickAction>,
+    actionStore: QuickActions,
+    onAction: (QuickAction, word: String) -> Unit,
+    onConfigureActions: () -> Unit,
     onSave: (Entry, newShelf: String?) -> Unit,
     onDelete: (Entry) -> Unit,
     onClose: () -> Unit,
@@ -195,6 +224,19 @@ private fun EditorContent(
     var newShelf by rememberSaveable(key) { mutableStateOf(suggestedShelf) }
     var preview by rememberSaveable(key) { mutableStateOf(false) }
     var asking by remember(key) { mutableStateOf<String?>(null) } // "discard" or "delete"
+    var lookup by remember(key) { mutableStateOf<Lookup?>(null) }
+    var lookingUp by remember(key) { mutableStateOf(false) }
+    val coroutines = rememberCoroutineScope()
+    fun lookUp() {
+        if (lookingUp || headword.isBlank()) return
+        lookingUp = true
+        coroutines.launch {
+            lookup = Wiktionary.define(headword, language)
+            lookingUp = false
+        }
+    }
+    // A general word is looked up straight away; names rarely are in a dictionary.
+    LaunchedEffect(key) { if (entry.id == 0L && entry.scope == Scope.LIBRARY && entry.body.isBlank()) lookUp() }
 
     val needsShelf = scope == Scope.SHELF && shelfName == null
     val edited = entry.copy(
@@ -265,6 +307,18 @@ private fun EditorContent(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
+                Text("Look it up", style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
+                QuickActionRow(actions, actionStore, { onAction(it, headword.trim()) }, onConfigureActions)
+                Definitions(
+                    lookup = lookup,
+                    lookingUp = lookingUp,
+                    word = headword.trim(),
+                    onLookUp = ::lookUp,
+                    onPick = { definition ->
+                        val line = Wiktionary.markdown(definition)
+                        body = if (body.isBlank()) line else body.trimEnd() + "\n" + line
+                    },
+                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Notes", style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f))
                     TextButton(onClick = { preview = !preview }) { Text(if (preview) "Edit" else "Preview") }
@@ -321,6 +375,46 @@ private fun EditorContent(
             confirmButton = { TextButton(onClick = { asking = null; onDelete(entry) }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { asking = null }) { Text("Cancel") } },
         )
+    }
+}
+
+/** Wiktionary's definitions of the word, once looked up; tapping one adds it to the notes. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun Definitions(lookup: Lookup?, lookingUp: Boolean, word: String, onLookUp: () -> Unit, onPick: (Definition) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Surface(color = colors.surfaceContainer, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Wiktionary", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                if (lookingUp) {
+                    LoadingIndicator(Modifier.padding(12.dp).size(24.dp))
+                } else {
+                    TextButton(onClick = onLookUp, enabled = word.isNotEmpty()) { Text(if (lookup == null) "Look up" else "Again") }
+                }
+            }
+            when (lookup) {
+                is Lookup.Found -> {
+                    for (definition in lookup.definitions) {
+                        Text(
+                            buildAnnotatedString {
+                                if (definition.partOfSpeech.isNotEmpty()) {
+                                    withStyle(SpanStyle(fontStyle = FontStyle.Italic, color = colors.primary)) { append(definition.partOfSpeech) }
+                                    append("  ")
+                                }
+                                append(definition.text)
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.fillMaxWidth().clickable { onPick(definition) }.padding(vertical = 6.dp),
+                        )
+                    }
+                    Text("Tap one to add it to the notes. Only the word was sent.", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                }
+                Lookup.NotFound -> Text("Wiktionary has no entry for “$word”.", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                is Lookup.Failed -> Text(lookup.reason, style = MaterialTheme.typography.bodyMedium, color = colors.error)
+                null -> Text("Definitions of the word, if it is in the dictionary. Only the word is sent.", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+            }
+        }
     }
 }
 

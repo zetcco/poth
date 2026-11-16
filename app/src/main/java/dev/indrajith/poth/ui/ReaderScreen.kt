@@ -1,6 +1,7 @@
 package dev.indrajith.poth.ui
 
 import android.content.pm.ActivityInfo
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
@@ -56,6 +57,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -70,6 +72,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.indrajith.poth.Graph
+import dev.indrajith.poth.actions.LookupContext
+import dev.indrajith.poth.actions.QuickAction
+import dev.indrajith.poth.actions.Templates
 import dev.indrajith.poth.data.Entry
 import dev.indrajith.poth.data.Origin
 import dev.indrajith.poth.data.Position
@@ -165,7 +170,14 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
     var editing by remember { mutableStateOf<Entry?>(null) }
     val haptics = LocalHapticFeedback.current
 
-    SystemBars(visible = barsVisible || contentsOpen || editing != null)
+    // Quick actions hand the word (and the sentence it was read in) to other apps.
+    val quickActions = graph.quickActions
+    val actions by quickActions.actions.collectAsStateWithLifecycle()
+    var configuringActions by remember { mutableStateOf(false) }
+    var lastSentence by remember { mutableStateOf("") }
+    val context = LocalContext.current
+
+    SystemBars(visible = barsVisible || contentsOpen || editing != null || configuringActions)
     RotationLock(rotationLocked)
 
     val density = LocalDensity.current
@@ -221,6 +233,13 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
             }
         }
 
+        fun runAction(action: QuickAction, word: String) {
+            val lookup = LookupContext(word, lastSentence, book.title, book.author, section?.title.orEmpty())
+            if (!quickActions.launch(context, action, Templates.fill(action.template, lookup))) {
+                Toast.makeText(context, "${action.label} isn't available", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         PageTurner(
             turner = turner,
             marker = marker,
@@ -230,6 +249,7 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
                 // An underlined word opens its entries; anywhere else shows or hides the bars.
                 val hit = page.wordAt(x, y, marker)
                 if (hit != null && hit.marks.isNotEmpty()) {
+                    lastSentence = hit.sentence
                     cardIds = hit.marks.flatMap { it.entries }.distinct()
                 } else {
                     barsVisible = !barsVisible
@@ -240,6 +260,7 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
                 // Holding a word writes about it: its entry if it has one, a new one if not.
                 val hit = page.wordAt(x, y, marker) ?: return@PageTurner
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                lastSentence = hit.sentence
                 val existing = entries.firstOrNull { entry -> hit.marks.any { entry.id in it.entries } }
                 if (existing != null) {
                     editing = existing
@@ -352,6 +373,10 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
                     Scope.LIBRARY -> "Library"
                 }
             },
+            actions = actions,
+            actionStore = quickActions,
+            onAction = { action -> runAction(action, entries.firstOrNull { it.id in cardIds }?.headword.orEmpty()) },
+            onConfigureActions = { configuringActions = true },
             onEdit = { entry ->
                 cardIds = emptyList()
                 editing = entry
@@ -377,6 +402,11 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
             entry = editing,
             shelfName = shelf?.name,
             suggestedShelf = suggestedShelf,
+            language = book.locale.language,
+            actions = actions,
+            actionStore = quickActions,
+            onAction = ::runAction,
+            onConfigureActions = { configuringActions = true },
             onSave = { edited, newShelf ->
                 val original = editing
                 editing = null
@@ -398,6 +428,7 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
             },
             onClose = { editing = null },
         )
+        QuickActionsPanel(open = configuringActions, store = quickActions, onClose = { configuringActions = false })
     }
 }
 

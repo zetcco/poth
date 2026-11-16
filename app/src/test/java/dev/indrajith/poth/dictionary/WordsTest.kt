@@ -81,4 +81,13 @@ class WordsTest {
         val text = "Syl laughed. Syl flew."
         assertEquals(listOf(13), matcher.find(text, 10, text.length).map { it.start })
     }
+
+    @Test
+    fun theSentenceAroundAWord() {
+        val text = "Jasnah turned away. “She passed the Parshendi delegation,” he said. Then left."
+        val start = text.indexOf("Parshendi")
+        assertEquals("“She passed the Parshendi delegation,” he said.", Words.sentenceAround(text, start, start + 9))
+        assertEquals("Then left.", Words.sentenceAround(text, text.indexOf("left"), text.indexOf("left") + 4))
+        assertEquals("that shadow—skin", Words.sentenceAround("that shadow\u2060—skin", 0, 4))
+    }
 }

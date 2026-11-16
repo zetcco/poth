@@ -48,6 +48,19 @@ object Words {
         return tokens(text, start, text.length).firstOrNull()
     }
 
+    /**
+     * The sentence that [start] until [end] is in: back to the last . ! ? (or the paragraph's
+     * start) and on to the next, with its closing quotes.
+     */
+    fun sentenceAround(text: CharSequence, start: Int, end: Int): String {
+        var from = start.coerceIn(0, text.length)
+        while (from > 0 && text[from - 1] !in ".!?…\n") from--
+        var to = end.coerceIn(0, text.length)
+        while (to < text.length && text[to] !in ".!?…\n") to++
+        while (to < text.length && text[to] in ".!?…”’\"'") to++
+        return text.subSequence(from, to).toString().replace("\u2060", "").trim()
+    }
+
     /** Whether the word at [start] begins a sentence: nothing but quotes and space since . ! ? or the start. */
     fun startsSentence(text: CharSequence, start: Int): Boolean {
         var i = start - 1

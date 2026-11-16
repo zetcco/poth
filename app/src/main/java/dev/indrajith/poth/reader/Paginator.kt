@@ -61,7 +61,14 @@ fun interface Marker {
  * The word under a point on a page: [start] until [end] are offsets in the chapter, and [marks]
  * the underlines on it. A term of several words ("Jasnah Kholin") is hit as a whole.
  */
-class WordHit(val word: String, val start: Int, val end: Int, val startsSentence: Boolean, val marks: List<Mark>)
+class WordHit(
+    val word: String,
+    val start: Int,
+    val end: Int,
+    val startsSentence: Boolean,
+    val sentence: String,
+    val marks: List<Mark>,
+)
 
 /** One page of a chapter: [start] until [end] are character offsets in the chapter. */
 class Page(
@@ -170,7 +177,14 @@ private class TextSlice(
         val marks = marks(marker).filter { it.start < token.end && it.end > token.start }
         val start = marks.minOfOrNull { it.start } ?: token.start
         val end = marks.maxOfOrNull { it.end } ?: token.end
-        return WordHit(text.subSequence(start, end).toString(), blockStart + start, blockStart + end, Words.startsSentence(text, start), marks)
+        return WordHit(
+            word = text.subSequence(start, end).toString(),
+            start = blockStart + start,
+            end = blockStart + end,
+            startsSentence = Words.startsSentence(text, start),
+            sentence = Words.sentenceAround(text, start, end),
+            marks = marks,
+        )
     }
 
     fun text(): String = layout.text.subSequence(from, to).toString()

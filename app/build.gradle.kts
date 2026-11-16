@@ -39,4 +39,5 @@ dependencies {
     implementation(libs.jsoup)
 
     testImplementation(libs.junit)
+    testImplementation(libs.org.json)
 }

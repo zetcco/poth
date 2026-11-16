@@ -21,6 +21,7 @@ adb shell am start -n dev.indrajith.poth/.MainActivity
   importing a picked file.
 - `dictionary/`: matching dictionary terms in text, guessing a new entry's scope, and the small
   Markdown subset entries are written in. Plain Kotlin, tested on the JVM.
+- `actions/`: quick actions, handing a word (filled into a template) to other apps.
 - `ui/`: Compose screens: the book list, the reader, and the dictionary card and editor.
 
 A reading position is a spine index and a character offset in that chapter's text, so it does not
@@ -38,7 +39,7 @@ Built in iterations; each one ends with something usable on the phone.
 - [x] 2. Reader bars: title/section/page, "18 of 1789", part ticks, safe scrubber, contents
 - [x] 3. Pinch zoom (magnify without reflow)
 - [x] 4. Dictionary: Markdown entries, Book/Shelf/Library scopes, underlines
-- [ ] 5. Quick actions: look a word up in installed apps, prompt templates
+- [x] 5. Quick actions: look a word up in installed apps, prompt templates; Wiktionary definitions
 - [ ] 6. Reading stats (weighted at query time; quick glances don't count)
 - [ ] 7. Polish: search, font settings, `.md` export, backup
 - Later: library and shelf screens, images in entries, where each edit was made

@@ -1,9 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- No permissions: books come in through the system file picker and are copied into the
-         app's own storage. allowBackup is off because those copies would blow the 25 MB limit
-         of Android's backup; poth gets its own export later. -->
+    <!-- Only for looking words up in Wiktionary; only the word is sent. Books come in through the
+         system file picker and are copied into the app's own storage. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- The apps a word can be handed to by the quick actions (Android hides other apps' activities
+         unless they are asked for). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="text/plain" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.WEB_SEARCH" />
+        </intent>
+    </queries>
+
+    <!-- allowBackup is off because the copied books would blow the 25 MB limit of Android's
+         backup; poth gets its own export later. -->
     <application
         android:name=".PothApp"
         android:allowBackup="false"
