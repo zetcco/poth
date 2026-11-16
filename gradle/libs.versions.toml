@@ -1,0 +1,32 @@
+# AGP, Kotlin, Compose and the AndroidX basics match ~/personal/projects/kriya/android,
+# so both projects share one Gradle cache.
+[versions]
+agp = "9.5.0"
+kotlin = "2.4.21"
+composeBom = "2026.09.00"
+# Material 3 Expressive (flexible app bars, loading indicator, the expressive theme) is only in
+# 1.5; the BOM above still pins 1.4.0.
+material3 = "1.5.0-rc01"
+activityCompose = "1.13.0"
+coreKtx = "1.19.1"
+lifecycle = "2.11.0"
+coroutines = "1.11.0"
+# EPUB files: container.xml, the OPF and the XHTML chapters. Looked up on 2026-11-16 from
+# Maven Central; 1.24.1 was two weeks old, so the previous release.
+jsoup = "1.23.2"
+junit = "4.13.2"
+
+[libraries]
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+compose-material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
+compose-ui = { module = "androidx.compose.ui:ui" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
+junit = { module = "junit:junit", version.ref = "junit" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
