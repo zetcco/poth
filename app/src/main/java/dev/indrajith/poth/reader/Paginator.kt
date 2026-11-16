@@ -41,8 +41,11 @@ data class PageSpec(
     val typeface: Typeface = Typeface.SERIF,
 )
 
-/** An image as decoded for the page, with the size of the original file. */
-class DecodedImage(val bitmap: Bitmap, val width: Int, val height: Int)
+/**
+ * An image as decoded for the page, with the size of the original file. Counting pages needs
+ * only the size, so [bitmap] is null then.
+ */
+class DecodedImage(val bitmap: Bitmap?, val width: Int, val height: Int)
 
 /** One page of a chapter: [start] until [end] are character offsets in the chapter. */
 class Page(
@@ -82,8 +85,10 @@ private class TextSlice(
     }
 }
 
-private class ImageItem(val bitmap: Bitmap, val rect: RectF) : PageItem {
-    override fun draw(canvas: Canvas) = canvas.drawBitmap(bitmap, null, rect, imagePaint)
+private class ImageItem(val bitmap: Bitmap?, val rect: RectF) : PageItem {
+    override fun draw(canvas: Canvas) {
+        if (bitmap != null) canvas.drawBitmap(bitmap, null, rect, imagePaint)
+    }
 }
 
 private class RuleItem(val x0: Float, val x1: Float, val y: Float, val paint: Paint) : PageItem {
@@ -105,6 +110,14 @@ class Paginator(
         color = spec.textColor
         alpha = 0x70
         strokeWidth = max(1f, spec.fontPx / 16)
+    }
+
+    companion object {
+        /**
+         * Part of the key saved page counts are stored under. Raise it whenever a change to the
+         * parser or the paginator can move a page break, so old counts are not used.
+         */
+        const val VERSION = 1
     }
 
     fun paginate(spine: Int, chapter: Chapter): List<Page> {

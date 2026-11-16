@@ -150,4 +150,15 @@ class ChapterParserTest {
         )
         assertEquals("cover.jpeg", (blocks.single() as ImageBlock).path)
     }
+
+    @Test
+    fun anchorsAreCharacterOffsets() {
+        val parser = ChapterParser { emptyList() }
+        val chapter = parser.parse(
+            Jsoup.parse("""<body><p id="pro">One</p><p>Two <span id="mid">three</span></p><div id="end"></div></body>"""),
+            "a.html",
+        )
+        assertEquals(mapOf("pro" to 0, "mid" to 7, "end" to 12), chapter.anchors)
+        assertEquals(12, chapter.length) // "One" and "Two three"
+    }
 }

@@ -82,6 +82,17 @@ class PothDatabase(context: Context, name: String? = "poth.db") :
                 "CREATE INDEX page_views_by_time ON page_views (shown_at)",
                 "CREATE INDEX page_views_by_book ON page_views (book_id, shown_at)",
             ),
+            // 2: pages per chapter, per layout (screen size and type), as comma-separated counts.
+            listOf(
+                """
+                CREATE TABLE page_counts (
+                    book_id TEXT NOT NULL REFERENCES books (id) ON DELETE CASCADE,
+                    layout TEXT NOT NULL,
+                    counts TEXT NOT NULL,
+                    PRIMARY KEY (book_id, layout)
+                )
+                """,
+            ),
         )
     }
 }

@@ -20,6 +20,6 @@ fun PothRoot() {
         BooksScreen(graph, onOpen = { openBookId = it })
     } else {
         BackHandler { openBookId = null }
-        ReaderScreen(graph, bookId)
+        ReaderScreen(graph, bookId, onBack = { openBookId = null })
     }
 }

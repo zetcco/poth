@@ -30,6 +30,9 @@ data class ManifestItem(val id: String, val path: String, val mediaType: String,
 /** One entry in reading order. Non-linear ones (pop-up notes and the like) are kept but marked. */
 data class SpineItem(val item: ManifestItem, val linear: Boolean)
 
+/** One line of the table of contents: [path] is a zip path, [fragment] an id in it (or null). */
+data class TocEntry(val title: String, val depth: Int, val path: String, val fragment: String?)
+
 /** An open EPUB. Entries are read from the zip when asked for; close it when done. */
 class EpubBook private constructor(
     private val zip: ZipFile,
@@ -52,6 +55,61 @@ class EpubBook private constructor(
 
     /** A chapter (or any XHTML entry), parsed leniently. The charset comes from the file itself. */
     fun html(path: String): Document = Jsoup.parse(ByteArrayInputStream(read(path)), null, path)
+
+    /**
+     * The table of contents: EPUB 3's nav document if there is one, otherwise EPUB 2's NCX.
+     * Empty if the book has neither, or they cannot be read.
+     */
+    val toc: List<TocEntry> by lazy {
+        try {
+            manifest.values.firstOrNull { "nav" in it.properties }?.let { navToc(it.path) }?.takeIf { it.isNotEmpty() }
+                ?: manifest.values.firstOrNull { it.mediaType == "application/x-dtbncx+xml" }?.let { ncxToc(it.path) }
+                ?: emptyList()
+        } catch (e: EpubException) {
+            emptyList()
+        } catch (e: IOException) {
+            emptyList()
+        }
+    }
+
+    private fun navToc(path: String): List<TocEntry> {
+        val doc = html(path)
+        val nav = doc.select("nav").firstOrNull { it.attr("epub:type").split(' ').contains("toc") }
+            ?: doc.select("nav").firstOrNull()
+            ?: return emptyList()
+        val base = path.substringBeforeLast('/', "")
+        val entries = mutableListOf<TocEntry>()
+        fun list(ol: Element, depth: Int) {
+            for (li in ol.children().filter { it.normalName() == "li" }) {
+                val link = li.children().firstOrNull { it.normalName() == "a" || it.normalName() == "span" }
+                val href = link?.attr("href").orEmpty()
+                val title = link?.text()?.trim().orEmpty()
+                if (title.isNotEmpty() && href.isNotEmpty()) entries += entry(title, depth, base, href)
+                li.children().firstOrNull { it.normalName() == "ol" }?.let { list(it, depth + 1) }
+            }
+        }
+        nav.children().firstOrNull { it.normalName() == "ol" }?.let { list(it, 0) }
+        return entries
+    }
+
+    private fun ncxToc(path: String): List<TocEntry> {
+        val doc = Jsoup.parse(ByteArrayInputStream(read(path)), null, "", Parser.xmlParser())
+        val base = path.substringBeforeLast('/', "")
+        val entries = mutableListOf<TocEntry>()
+        fun points(parent: Element, depth: Int) {
+            for (point in parent.childrenNamed("navpoint")) {
+                val title = point.childrenNamed("navlabel").firstOrNull()?.text()?.trim().orEmpty()
+                val src = point.childrenNamed("content").firstOrNull()?.attr("src").orEmpty()
+                if (title.isNotEmpty() && src.isNotEmpty()) entries += entry(title, depth, base, src)
+                points(point, depth + 1)
+            }
+        }
+        doc.allNamed("navmap").firstOrNull()?.let { points(it, 0) }
+        return entries
+    }
+
+    private fun entry(title: String, depth: Int, base: String, href: String) =
+        TocEntry(title, depth, resolvePath(base, href), href.substringAfter('#', "").ifEmpty { null })
 
     override fun close() = zip.close()
 

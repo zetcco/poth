@@ -149,4 +149,65 @@ class EpubBookTest {
         assertEquals("a+b.xhtml", resolvePath("", "a+b.xhtml"))
         assertEquals("x.xhtml", resolvePath("", "./x.xhtml#frag"))
     }
+
+    @Test
+    fun readsTheNcxTableOfContents() {
+        val opf = """
+            <package><metadata><title>T</title></metadata>
+              <manifest>
+                <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+                <item id="a" href="text/a.html" media-type="application/xhtml+xml"/>
+              </manifest>
+              <spine toc="ncx"><itemref idref="a"/></spine></package>
+        """.trimIndent()
+        val ncx = """
+            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap>
+              <navPoint id="p1"><navLabel><text>Prologue: To Question</text></navLabel><content src="text/a.html#pro"/></navPoint>
+              <navPoint id="p2"><navLabel><text>Part One</text></navLabel><content src="text/a.html"/>
+                <navPoint id="p3"><navLabel><text>1. Santhid</text></navLabel><content src="text/b%20c.html"/></navPoint>
+              </navPoint>
+            </navMap></ncx>
+        """.trimIndent()
+        val file = epub(container("content.opf"), "content.opf" to opf, "toc.ncx" to ncx, "text/a.html" to "<p>a</p>")
+
+        EpubBook.open(file).use { book ->
+            assertEquals(
+                listOf(
+                    TocEntry("Prologue: To Question", 0, "text/a.html", "pro"),
+                    TocEntry("Part One", 0, "text/a.html", null),
+                    TocEntry("1. Santhid", 1, "text/b c.html", null),
+                ),
+                book.toc,
+            )
+        }
+    }
+
+    @Test
+    fun prefersTheEpub3NavDocument() {
+        val opf = """
+            <package version="3.0"><metadata><title>T</title></metadata>
+              <manifest>
+                <item id="nav" href="nav/nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+                <item id="a" href="a.xhtml" media-type="application/xhtml+xml"/>
+              </manifest>
+              <spine><itemref idref="a"/></spine></package>
+        """.trimIndent()
+        val nav = """
+            <html xmlns:epub="http://www.idpf.org/2007/ops"><body>
+              <nav epub:type="landmarks"><ol><li><a href="../a.xhtml">Start</a></li></ol></nav>
+              <nav epub:type="toc"><h1>Contents</h1><ol>
+                <li><a href="../a.xhtml#c1">Chapter One</a><ol><li><a href="../a.xhtml#s1">A scene</a></li></ol></li>
+                <li><span>Unlinked heading</span></li>
+              </ol></nav>
+            </body></html>
+        """.trimIndent()
+        val file = epub(container("content.opf"), "content.opf" to opf, "nav/nav.xhtml" to nav, "a.xhtml" to "<p>a</p>")
+
+        EpubBook.open(file).use { book ->
+            assertEquals(
+                listOf(TocEntry("Chapter One", 0, "a.xhtml", "c1"), TocEntry("A scene", 1, "a.xhtml", "s1")),
+                book.toc,
+            )
+        }
+    }
 }

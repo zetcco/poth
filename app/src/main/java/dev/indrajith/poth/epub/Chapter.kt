@@ -63,8 +63,8 @@ data class RuleBlock(override val start: Int, override val style: BlockStyle) : 
     override val length get() = 1
 }
 
-/** One spine item, ready to be laid out. */
-class Chapter(val blocks: List<Block>) {
+/** One spine item, ready to be laid out. [anchors] maps element ids to character offsets, for links. */
+class Chapter(val blocks: List<Block>, val anchors: Map<String, Int> = emptyMap()) {
     val length: Int = blocks.lastOrNull()?.let { it.start + it.length } ?: 0
 }
 
@@ -131,6 +131,7 @@ class ChapterParser(private val stylesheet: (path: String) -> List<CssRule>) {
 
     private class Builder(private val declared: Map<Element, Map<String, String>>, private val base: String) {
         private val blocks = mutableListOf<Block>()
+        private val anchors = HashMap<String, Int>()
         private val paragraph = Paragraph()
         private var offset = 0
         private var pendingTop = 0f      // collapsed top margins waiting for the next block
@@ -139,12 +140,13 @@ class ChapterParser(private val stylesheet: (path: String) -> List<CssRule>) {
 
         fun finish(): Chapter {
             flush()
-            return Chapter(blocks.toList())
+            return Chapter(blocks.toList(), anchors)
         }
 
         fun walk(element: Element, parent: Computed) {
             val name = element.normalName()
             if (name in SKIPPED) return
+            element.id().takeIf { it.isNotEmpty() }?.let { anchors.putIfAbsent(it, offset + paragraph.length) }
             val decl = (UA[name] ?: emptyMap()) + (declared[element] ?: emptyMap())
             if (decl["display"] == "none") return
 
@@ -239,6 +241,7 @@ class ChapterParser(private val stylesheet: (path: String) -> List<CssRule>) {
     /** The text of the paragraph being built, with whitespace collapsed as HTML does. */
     private class Paragraph {
         private val text = StringBuilder()
+        val length get() = text.length
         private val runs = mutableListOf<Run>()
 
         fun append(raw: String, style: Computed) {

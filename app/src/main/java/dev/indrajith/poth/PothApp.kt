@@ -4,8 +4,10 @@ import android.app.Application
 import android.content.Context
 import dev.indrajith.poth.data.BookFiles
 import dev.indrajith.poth.data.BookImporter
+import dev.indrajith.poth.data.PageCounts
 import dev.indrajith.poth.data.Books
 import dev.indrajith.poth.data.PothDatabase
+import dev.indrajith.poth.data.Prefs
 import dev.indrajith.poth.data.ReadingLog
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +23,8 @@ class Graph(
     val files: BookFiles,
     val importer: BookImporter,
     val log: ReadingLog,
+    val pageCounts: PageCounts,
+    val prefs: Prefs,
 )
 
 interface GraphOwner {
@@ -46,6 +50,8 @@ class PothApp : Application(), GraphOwner {
             files = files,
             importer = BookImporter(contentResolver, books, files),
             log = ReadingLog(db),
+            pageCounts = PageCounts(db),
+            prefs = Prefs(this),
         )
         scope.launch(Dispatchers.IO) { books.load() }
     }
