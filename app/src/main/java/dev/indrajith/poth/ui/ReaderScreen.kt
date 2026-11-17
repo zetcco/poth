@@ -3,6 +3,7 @@ package dev.indrajith.poth.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.pm.ActivityInfo
+import android.graphics.Paint
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
@@ -584,9 +585,13 @@ private fun Zoom.toScreen(at: Offset, origin: Offset) = Offset(pan.x + scale * (
 // The selection handles: a drop hanging from each end of the highlight.
 private val HandleRadius = 11.dp
 
+// How dark a page is while another fully covers it.
+private const val CoveredDim = 0.5f
+
 /**
- * Draws [turner]'s page and turns it by swiping sideways: the next or previous page slides in,
- * and a short or slow swipe springs back. A swipe up or down turns nothing, and a swipe in from
+ * Draws [turner]'s page and turns it by swiping sideways: the page slides off to uncover the next
+ * one lying beneath it, or the previous page slides back over it. A short or slow swipe springs
+ * back. A swipe up or down turns nothing, and a swipe in from
  * a side edge goes back. Two fingers zoom the page; while it is zoomed, one finger moves it
  * instead of turning, and a double tap or Back zooms out.
  * Holding a word highlights it, and moving on before letting go highlights the words on to the
@@ -649,6 +654,9 @@ private fun PageTurner(
     val highlightColor = handleColor.copy(alpha = 0.35f).toArgb()
     val handleRadius = with(density) { HandleRadius.toPx() }
     val handleReach = handleRadius + with(density) { 16.dp.toPx() }
+    val coverFill = remember { Paint().apply { color = Page.background.toArgb() } }
+    val coverDim = remember { Paint().apply { color = Page.background.toArgb() } }
+    val coverEdge = remember { Paint().apply { color = Page.text.copy(alpha = 0.3f).toArgb() } }
 
     /** Which handle is at [at] on the screen: the start's (true), the end's (false), or neither. */
     fun handleAt(at: Offset): Boolean? {
@@ -842,8 +850,37 @@ private fun PageTurner(
                 page.draw(native, marker, highlight)
                 native.restore()
             }
-            draw(turner.shown?.page, dx, turner.selection?.let { Highlight(it.start, it.end, highlightColor) })
-            if (dx < 0) draw(turner.next, dx + size.width) else if (dx > 0) draw(turner.previous, dx - size.width)
+            // A page beneath one sliding over it is dimmed by how much of it is covered; on black
+            // that does what a shadow would.
+            fun beneath(page: BookPage?, covered: Float, highlight: Highlight? = null) {
+                draw(page, 0f, highlight)
+                coverDim.alpha = (covered.coerceIn(0f, 1f) * CoveredDim * 255).toInt()
+                native.drawRect(0f, 0f, size.width, size.height, coverDim)
+            }
+            // A sliding page hides what is under it, and a faint line marks its edge.
+            fun over(page: BookPage?, shift: Float, highlight: Highlight? = null) {
+                if (page == null) return
+                native.drawRect(shift, 0f, shift + size.width, size.height, coverFill)
+                draw(page, shift, highlight)
+                val edge = shift + size.width
+                native.drawRect(edge - 1.dp.toPx(), 0f, edge, size.height, coverEdge)
+            }
+            val page = turner.shown?.page
+            val highlight = turner.selection?.let { Highlight(it.start, it.end, highlightColor) }
+            when {
+                // On: this page slides off to the left, uncovering the next one where it lies.
+                dx < 0 -> {
+                    beneath(turner.next, covered = 1 + dx / size.width)
+                    over(page, dx, highlight)
+                }
+                // Back: the previous page slides in over this one. On the first page there is
+                // none, and this page gives a little instead.
+                dx > 0 && turner.previous != null -> {
+                    beneath(page, covered = dx / size.width, highlight)
+                    over(turner.previous, dx - size.width)
+                }
+                else -> draw(page, dx, highlight)
+            }
             native.restore()
         }
         val rects = passage?.rects
