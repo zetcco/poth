@@ -425,7 +425,6 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
                     lastSentence = selected.sentence
                     runAction(action, selected.text)
                 },
-                onConfigureActions = { configuringActions = true },
                 onCopy = {
                     turner.selection = null
                     context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(book.title, selected.text))

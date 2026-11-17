@@ -49,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import dev.indrajith.poth.R
@@ -58,17 +59,19 @@ import dev.indrajith.poth.actions.QuickActions
 import dev.indrajith.poth.actions.Templates
 
 /**
- * The quick actions as their apps' icons, and a button to change them. Holding an icon shows
- * the action's name.
+ * The quick actions as their apps' icons, and a button to change them unless [onConfigure] is
+ * null. Holding an icon shows the action's name. [buttonSize] and [iconSize] make them smaller
+ * where room is short.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuickActionRow(
     actions: List<QuickAction>,
     store: QuickActions,
     onAction: (QuickAction) -> Unit,
-    onConfigure: () -> Unit,
+    onConfigure: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    buttonSize: Dp = 52.dp,
+    iconSize: Dp = 30.dp,
 ) {
     Row(
         modifier.horizontalScroll(rememberScrollState()),
@@ -76,18 +79,28 @@ fun QuickActionRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         for (action in actions) {
-            TooltipBox(
-                positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
-                tooltip = { PlainTooltip { Text(action.label) } },
-                state = rememberTooltipState(),
-            ) {
-                IconButton(onClick = { onAction(action) }, modifier = Modifier.size(52.dp)) {
-                    ActionIcon(action, store, Modifier.size(30.dp), label = action.label)
+            Labelled(action.label) {
+                IconButton(onClick = { onAction(action) }, modifier = Modifier.size(buttonSize)) {
+                    ActionIcon(action, store, Modifier.size(iconSize), label = action.label)
                 }
             }
         }
-        IconButton(onClick = onConfigure) { Icon(painterResource(R.drawable.ic_tune), contentDescription = "Change quick actions") }
+        if (onConfigure != null) {
+            IconButton(onClick = onConfigure) { Icon(painterResource(R.drawable.ic_tune), contentDescription = "Change quick actions") }
+        }
     }
+}
+
+/** [content], an icon button, with [label] shown above it while it is held. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun Labelled(label: String, content: @Composable () -> Unit) {
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(label) } },
+        state = rememberTooltipState(),
+        content = content,
+    )
 }
 
 @Composable
