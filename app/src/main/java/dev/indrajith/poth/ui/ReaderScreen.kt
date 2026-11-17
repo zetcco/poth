@@ -1,5 +1,7 @@
 package dev.indrajith.poth.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.pm.ActivityInfo
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -51,6 +53,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -83,6 +87,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.indrajith.poth.Graph
+import dev.indrajith.poth.R
 import dev.indrajith.poth.actions.LookupContext
 import dev.indrajith.poth.actions.QuickAction
 import dev.indrajith.poth.actions.Templates
@@ -96,6 +101,7 @@ import dev.indrajith.poth.dictionary.Words
 import dev.indrajith.poth.epub.EpubBook
 import dev.indrajith.poth.epub.EpubException
 import dev.indrajith.poth.reader.Arrival
+import dev.indrajith.poth.reader.Highlight
 import dev.indrajith.poth.reader.Marker
 import dev.indrajith.poth.reader.OpenBook
 import dev.indrajith.poth.reader.PageClock
@@ -104,10 +110,12 @@ import dev.indrajith.poth.reader.PageSpec
 import dev.indrajith.poth.reader.Pages
 import dev.indrajith.poth.reader.Section
 import dev.indrajith.poth.reader.Swipe
+import dev.indrajith.poth.reader.WordRange
 import dev.indrajith.poth.reader.Zoom
 import dev.indrajith.poth.widget.ReadingWidget
 import java.io.IOException
 import kotlin.math.max
+import kotlin.math.min
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -285,7 +293,12 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
             pageLeft = left.toFloat(),
             pageTop = top.toFloat(),
             onTap = { page, x, y ->
-                // An underlined word opens its entries; anywhere else shows or hides the bars.
+                // A tap drops a highlight first. Then an underlined word opens its entries;
+                // anywhere else shows or hides the bars.
+                if (turner.selection != null) {
+                    turner.selection = null
+                    return@PageTurner
+                }
                 val hit = page.wordAt(x, y, marker)
                 if (hit != null && hit.marks.isNotEmpty()) {
                     lastSentence = hit.sentence
@@ -293,25 +306,6 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
                 } else {
                     barsVisible = !barsVisible
                     if (!barsVisible) jumpedFrom = null
-                }
-            },
-            onLongPress = { page, x, y ->
-                // Holding a word writes about it: its entry if it has one, a new one if not.
-                val hit = page.wordAt(x, y, marker) ?: return@PageTurner
-                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                lastSentence = hit.sentence
-                val existing = entries.firstOrNull { entry -> hit.marks.any { entry.id in it.entries } }
-                if (existing != null) {
-                    editing = existing
-                } else {
-                    scope.launch {
-                        val lowercaseElsewhere = withContext(Dispatchers.Default) {
-                            val word = Regex("\\b${Regex.escape(hit.word.lowercase())}\\b")
-                            pages.of(page.spine).any { word.containsMatchIn(it.text()) }
-                        }
-                        val guess = Words.suggestScope(hit.word, hit.startsSentence, lowercaseElsewhere, shelf != null || suggestedShelf.isNotEmpty())
-                        editing = Entry(headword = Words.headword(hit.word, guess), scope = guess)
-                    }
                 }
             },
             onShow = { page, arrivedBy ->
@@ -384,6 +378,57 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
                     val target = jumpedFrom ?: return@ReaderBottomBar
                     jumpedFrom = null
                     scope.launch { turner.show(target, Arrival.JUMP) }
+                },
+            )
+        }
+        // Highlighted words: write about them, look them up, or copy them.
+        val selection = turner.selection
+        val selected = remember(current, selection) { selection?.let { current?.passage(it.start, it.end) } }
+        if (selected != null && selected.rects.isNotEmpty() && !turner.selecting && turner.offset.value == 0f) {
+            val existing = remember(selected.text, entries) {
+                val ids = marker.matcher.lookup(selected.text)
+                entries.firstOrNull { it.id in ids }
+            }
+            val zoom = turner.zoom
+            val origin = Offset(left.toFloat(), top.toFloat())
+            val rects = selected.rects
+            SelectionMenu(
+                anchor = Rect(
+                    zoom.toScreen(Offset(rects.minOf { it.left }, rects.first().top), origin),
+                    zoom.toScreen(Offset(rects.maxOf { it.right }, rects.last().bottom), origin),
+                ),
+                addLabel = if (existing != null) "Edit “${existing.headword}”" else "Add to dictionary",
+                addIcon = if (existing != null) R.drawable.ic_edit else R.drawable.ic_add,
+                actions = actions,
+                actionStore = quickActions,
+                onAdd = {
+                    turner.selection = null
+                    lastSentence = selected.sentence
+                    if (existing != null) {
+                        editing = existing
+                    } else {
+                        val text = selected.text
+                        val page = current
+                        scope.launch {
+                            // Capitalised only for starting a sentence, if it is in lowercase elsewhere.
+                            val lowercaseElsewhere = page != null && withContext(Dispatchers.Default) {
+                                val words = Regex("\\b${Regex.escape(text.lowercase())}\\b")
+                                pages.of(page.spine).any { words.containsMatchIn(it.text()) }
+                            }
+                            val guess = Words.suggestScope(text, selected.startsSentence, lowercaseElsewhere, shelf != null || suggestedShelf.isNotEmpty())
+                            editing = Entry(headword = Words.headword(text, guess), scope = guess)
+                        }
+                    }
+                },
+                onAction = { action ->
+                    turner.selection = null
+                    lastSentence = selected.sentence
+                    runAction(action, selected.text)
+                },
+                onConfigureActions = { configuringActions = true },
+                onCopy = {
+                    turner.selection = null
+                    context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(book.title, selected.text))
                 },
             )
         }
@@ -498,9 +543,15 @@ private class Turner(val pages: Pages) {
 
     var zoom by mutableStateOf(Zoom())
 
+    /** Words highlighted on the page shown, and whether a finger is still moving the highlight. */
+    var selection by mutableStateOf<WordRange?>(null)
+    var selecting by mutableStateOf(false)
+
     suspend fun show(page: BookPage, arrivedBy: String) {
         offset.snapTo(0f)
         zoom = Zoom()
+        selection = null
+        selecting = false
         shown = Shown(page, arrivedBy)
     }
 
@@ -525,12 +576,23 @@ private class Turner(val pages: Pages) {
     }
 }
 
+/** Where [at] on the screen is on a page drawn at [origin], through this zoom. */
+private fun Zoom.toPage(at: Offset, origin: Offset) = Offset((at.x - pan.x) / scale - origin.x, (at.y - pan.y) / scale - origin.y)
+
+/** Where [at] on a page drawn at [origin] is on the screen, through this zoom. */
+private fun Zoom.toScreen(at: Offset, origin: Offset) = Offset(pan.x + scale * (origin.x + at.x), pan.y + scale * (origin.y + at.y))
+
+// The selection handles: a drop hanging from each end of the highlight.
+private val HandleRadius = 11.dp
+
 /**
  * Draws [turner]'s page and turns it by swiping sideways: the next or previous page slides in,
  * and a short or slow swipe springs back. A swipe up or down turns nothing, and a swipe in from
  * a side edge goes back. Two fingers zoom the page; while it is zoomed, one finger moves it
- * instead of turning, and a double tap or Back zooms out. Taps and long presses are handed on
- * with the point on the page, zoom taken into account.
+ * instead of turning, and a double tap or Back zooms out.
+ * Holding a word highlights it, and moving on before letting go highlights the words on to the
+ * finger; the handles at its ends move them afterwards. A swipe, or Back, drops the highlight.
+ * Taps are handed on with the point on the page, zoom taken into account.
  * [onShow] hears about every page that settles on screen.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -541,7 +603,6 @@ private fun PageTurner(
     pageLeft: Float,
     pageTop: Float,
     onTap: (page: BookPage, x: Float, y: Float) -> Unit,
-    onLongPress: (page: BookPage, x: Float, y: Float) -> Unit,
     onShow: (BookPage, String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -550,7 +611,7 @@ private fun PageTurner(
     // The gesture handlers below are set up once; these keep them calling the latest callbacks,
     // which see the latest dictionary.
     val tap by rememberUpdatedState(onTap)
-    val longPress by rememberUpdatedState(onLongPress)
+    val currentMarker by rememberUpdatedState(marker)
 
     LaunchedEffect(shown) {
         if (shown == null) return@LaunchedEffect
@@ -567,6 +628,11 @@ private fun PageTurner(
         return
     }
     BackHandler(enabled = turner.zoom.zoomed) { scope.launch { turner.unzoom() } }
+    BackHandler(enabled = turner.selection != null) { turner.selection = null }
+    val origin = Offset(pageLeft, pageTop)
+    val selection = turner.selection
+    val passage = remember(shown.page, selection) { selection?.let { shown.page.passage(it.start, it.end) } }
+    val selected by rememberUpdatedState(passage)
 
     val density = LocalDensity.current
     val direction = LocalLayoutDirection.current
@@ -580,6 +646,55 @@ private fun PageTurner(
     val haptics = LocalHapticFeedback.current
     val pullFill = MaterialTheme.colorScheme.secondaryContainer
     val pullArrow = MaterialTheme.colorScheme.onSecondaryContainer
+    val handleColor = MaterialTheme.colorScheme.primary
+    val highlightColor = handleColor.copy(alpha = 0.35f).toArgb()
+    val handleRadius = with(density) { HandleRadius.toPx() }
+    val handleReach = handleRadius + with(density) { 16.dp.toPx() }
+
+    /** Which handle is at [at] on the screen: the start's (true), the end's (false), or neither. */
+    fun handleAt(at: Offset): Boolean? {
+        val rects = selected?.rects?.takeIf { it.isNotEmpty() } ?: return null
+        val zoom = turner.zoom
+        val start = zoom.toScreen(Offset(rects.first().left, rects.first().bottom), origin) + Offset(-handleRadius, handleRadius)
+        val end = zoom.toScreen(Offset(rects.last().right, rects.last().bottom), origin) + Offset(handleRadius, handleRadius)
+        val toStart = (at - start).getDistance()
+        val toEnd = (at - end).getDistance()
+        return when {
+            toStart <= handleReach && toStart <= toEnd -> true
+            toEnd <= handleReach -> false
+            else -> null
+        }
+    }
+
+    /**
+     * Highlights from [anchor] to the word under finger [id] as it moves, until it lifts. [grab]
+     * is how far the finger is from the point it moves: a handle's, below the text.
+     */
+    suspend fun AwaitPointerEventScope.extend(page: BookPage, id: PointerId, anchor: WordRange, grab: Offset) {
+        turner.selecting = true
+        while (true) {
+            val event = awaitPointerEvent()
+            val change = event.changes.firstOrNull { it.id == id } ?: break
+            // A second finger is zooming, which keeps the highlight as it is.
+            if (event.changes.count { it.pressed } > 1) break
+            if (!change.pressed) {
+                change.consume()
+                break
+            }
+            if (change.positionChanged()) {
+                val at = turner.zoom.toPage(change.position - grab, origin)
+                page.wordNear(at.x, at.y)?.let { word ->
+                    val next = WordRange(min(anchor.start, word.start), max(anchor.end, word.end))
+                    if (next != turner.selection) {
+                        turner.selection = next
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    }
+                }
+            }
+            change.consume()
+        }
+        turner.selecting = false
+    }
     Canvas(
         Modifier
             .fillMaxSize()
@@ -592,7 +707,6 @@ private fun PageTurner(
                 }
                 detectTapGestures(
                     onDoubleTap = if (turner.zoom.zoomed) { _ -> scope.launch { turner.unzoom() } } else null,
-                    onLongPress = { onPage(it, longPress) },
                     onTap = { onPage(it, tap) },
                 )
             }
@@ -601,8 +715,45 @@ private fun PageTurner(
                 val width = size.width.toFloat()
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
-                    // Which way it goes is read once the finger has moved past the touch slop.
-                    val moved = awaitSlop(down.id) ?: return@awaitEachGesture
+                    val page = turner.shown?.page ?: return@awaitEachGesture
+                    // A handle moves its end of the highlight; the word at the other end stays.
+                    val handle = handleAt(down.position)
+                    val rects = selected?.rects
+                    val current = turner.selection
+                    if (handle != null && rects != null && current != null) {
+                        down.consume()
+                        val anchor = if (handle) {
+                            page.wordAround(current.end - 1) ?: WordRange(current.end, current.end)
+                        } else {
+                            page.wordAround(current.start) ?: WordRange(current.start, current.start)
+                        }
+                        val textPoint = if (handle) Offset(rects.first().left, rects.first().centerY()) else Offset(rects.last().right, rects.last().centerY())
+                        extend(page, down.id, anchor, grab = down.position - turner.zoom.toScreen(textPoint, origin))
+                        return@awaitEachGesture
+                    }
+                    // Held still, it highlights the word; moved, it is a swipe, read once past the touch slop.
+                    var slop: Offset? = null
+                    val decided = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                        slop = awaitSlop(down.id)
+                        true
+                    }
+                    if (decided == null) {
+                        val at = turner.zoom.toPage(down.position, origin)
+                        val hit = page.wordAt(at.x, at.y, currentMarker)
+                        if (hit == null) {
+                            // No word here; and a long press is not a tap.
+                            follow(down.id) {}
+                            currentEvent.changes.forEach { it.consume() }
+                            return@awaitEachGesture
+                        }
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        val word = WordRange(hit.start, hit.end)
+                        turner.selection = word
+                        extend(page, down.id, word, grab = Offset.Zero)
+                        return@awaitEachGesture
+                    }
+                    val moved = slop ?: return@awaitEachGesture
+                    turner.selection = null
                     when {
                         // Up or down: not a page turn, and not a tap either.
                         !Swipe.sideways(moved.x, moved.y) -> follow(down.id) {}
@@ -685,16 +836,22 @@ private fun PageTurner(
             val zoom = turner.zoom
             native.translate(zoom.pan.x, zoom.pan.y)
             native.scale(zoom.scale, zoom.scale)
-            fun draw(page: BookPage?, shift: Float) {
+            fun draw(page: BookPage?, shift: Float, highlight: Highlight? = null) {
                 if (page == null) return
                 native.save()
                 native.translate(pageLeft + shift, pageTop)
-                page.draw(native, marker)
+                page.draw(native, marker, highlight)
                 native.restore()
             }
-            draw(turner.shown?.page, dx)
+            draw(turner.shown?.page, dx, turner.selection?.let { Highlight(it.start, it.end, highlightColor) })
             if (dx < 0) draw(turner.next, dx + size.width) else if (dx > 0) draw(turner.previous, dx - size.width)
             native.restore()
+        }
+        val rects = passage?.rects
+        if (!rects.isNullOrEmpty() && dx == 0f) {
+            val zoom = turner.zoom
+            drawHandle(zoom.toScreen(Offset(rects.first().left, rects.first().bottom), origin), start = true, handleColor, handleRadius)
+            drawHandle(zoom.toScreen(Offset(rects.last().right, rects.last().bottom), origin), start = false, handleColor, handleRadius)
         }
         turner.pull?.let { drawPull(it, pullFill, pullArrow) }
     }
@@ -735,6 +892,12 @@ private suspend fun AwaitPointerEventScope.follow(id: PointerId, onMove: (Pointe
         onMove(change)
         change.consume()
     }
+}
+
+/** A selection handle: a drop hanging from [tip], its point at the start or end of the highlight. */
+private fun DrawScope.drawHandle(tip: Offset, start: Boolean, color: Color, radius: Float) {
+    drawCircle(color, radius, Offset(if (start) tip.x - radius else tip.x + radius, tip.y + radius))
+    drawRect(color, topLeft = Offset(if (start) tip.x - radius else tip.x, tip.y), size = Size(radius, radius))
 }
 
 /** The arrow at a side edge while a swipe from it is on its way to going back. */

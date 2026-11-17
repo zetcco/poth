@@ -29,6 +29,9 @@ object Words {
         return tokens
     }
 
+    /** Text as a term is written: without soft hyphens or word joiners, its spaces single. */
+    fun clean(text: String): String = text.replace("\u00AD", "").replace("\u2060", "").replace(Regex("\\s+"), " ").trim()
+
     /** How a word is matched: lowercase, without a possessive ending (Elhokar’s, knights’). */
     fun key(word: String): String {
         val lower = word.lowercase(Locale.ROOT)

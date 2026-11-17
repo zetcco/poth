@@ -90,4 +90,11 @@ class WordsTest {
         assertEquals("Then left.", Words.sentenceAround(text, text.indexOf("left"), text.indexOf("left") + 4))
         assertEquals("that shadow—skin", Words.sentenceAround("that shadow\u2060—skin", 0, 4))
     }
+
+    @Test
+    fun highlightedTextIsWrittenAsATerm() {
+        assertEquals("Basic Lashing", Words.clean("Basic\nLashing"))
+        assertEquals("Shardblade", Words.clean("Shard\u00ADblade"))
+        assertEquals("shadow—skin", Words.clean(" shadow\u2060—skin "))
+    }
 }

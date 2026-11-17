@@ -28,6 +28,7 @@ import dev.indrajith.poth.epub.RuleBlock
 import dev.indrajith.poth.epub.Shift
 import dev.indrajith.poth.epub.TextBlock
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -70,6 +71,27 @@ class WordHit(
     val marks: List<Mark>,
 )
 
+/** A word, or a run of words: [start] until [end] in the chapter. */
+data class WordRange(val start: Int, val end: Int)
+
+/**
+ * Some of a page's text, [start] until [end] in the chapter: what it says (as a term is
+ * written), the sentence it begins in, and where it is drawn on the page, a rectangle a line.
+ */
+class Passage(
+    val start: Int,
+    val end: Int,
+    val text: String,
+    val sentence: String,
+    val startsSentence: Boolean,
+    val rects: List<RectF>,
+)
+
+/** Text highlighted on a page: [start] until [end] in the chapter, filled with [color]. */
+class Highlight(val start: Int, val end: Int, color: Int) {
+    val paint = Paint().apply { this.color = color }
+}
+
 /** One page of a chapter: [start] until [end] are character offsets in the chapter. */
 class Page(
     val spine: Int,
@@ -79,19 +101,48 @@ class Page(
     val words: Int,
     private val items: List<PageItem>,
 ) {
-    /** Draws the page with its top left corner at the canvas's origin, underlining what [marker] says. */
-    fun draw(canvas: Canvas, marker: Marker? = null) = items.forEach { it.draw(canvas, marker) }
+    private val slices get() = items.filterIsInstance<TextSlice>()
+
+    /**
+     * Draws the page with its top left corner at the canvas's origin, underlining what [marker]
+     * says and filling in behind [highlight].
+     */
+    fun draw(canvas: Canvas, marker: Marker? = null, highlight: Highlight? = null) = items.forEach { it.draw(canvas, marker, highlight) }
 
     /** The word at [x], [y] on the page, or null if there is no text there. */
     fun wordAt(x: Float, y: Float, marker: Marker?): WordHit? =
         items.firstNotNullOfOrNull { (it as? TextSlice)?.wordAt(x, y, marker) }
+
+    /**
+     * The word nearest [x], [y]: the one there, or on the line nearest the point, the closest
+     * word on it. Null on a page without text.
+     */
+    fun wordNear(x: Float, y: Float): WordRange? = slices.minByOrNull { it.distanceTo(y) }?.wordNear(x, y)
+
+    /** The word that chapter offset [offset] is in, if it is on this page. */
+    fun wordAround(offset: Int): WordRange? = slices.firstNotNullOfOrNull { it.wordAround(offset) }
+
+    /** The text from [start] until [end] in the chapter, or null if none of it is on this page. */
+    fun passage(start: Int, end: Int): Passage? {
+        val parts = slices.mapNotNull { it.part(start, end) }
+        if (parts.isEmpty()) return null
+        val first = slices.firstOrNull { it.covers(start) } ?: slices.first { it.part(start, end) != null }
+        return Passage(
+            start = start,
+            end = end,
+            text = Words.clean(parts.joinToString(" ") { it.first }),
+            sentence = first.sentence(start, end),
+            startsSentence = first.startsSentence(start),
+            rects = parts.flatMap { it.second },
+        )
+    }
 
     /** The page's text, a paragraph (or part of one) a line. */
     fun text(): String = items.filterIsInstance<TextSlice>().joinToString("\n") { it.text() }
 }
 
 sealed interface PageItem {
-    fun draw(canvas: Canvas, marker: Marker?)
+    fun draw(canvas: Canvas, marker: Marker?, highlight: Highlight?)
 }
 
 /** The dashed underlines for dictionary words, in the text's colour. */
@@ -138,13 +189,16 @@ private class TextSlice(
         return marks
     }
 
-    override fun draw(canvas: Canvas, marker: Marker?) {
+    override fun draw(canvas: Canvas, marker: Marker?, highlight: Highlight?) {
         val top = layout.getLineTop(firstLine).toFloat()
         val bottom = layout.getLineBottom(endLine - 1).toFloat()
         canvas.save()
         canvas.translate(x, y - top)
         // Layout.draw draws the lines the clip touches, so the clip picks this page's lines.
         canvas.clipRect(-x, top, pageWidth - x, bottom)
+        if (highlight != null) {
+            for (rect in rects(highlight.start - blockStart, highlight.end - blockStart)) canvas.drawRect(rect, highlight.paint)
+        }
         layout.draw(canvas)
         for (mark in marks(marker)) underline(canvas, mark)
         canvas.restore()
@@ -187,6 +241,70 @@ private class TextSlice(
     }
 
     fun text(): String = layout.text.subSequence(from, to).toString()
+
+    /** Whether chapter offset [offset] is in this slice's text. */
+    fun covers(offset: Int): Boolean = offset - blockStart in from until to
+
+    /** How far [py] on the page is above or below this slice; 0 if it is beside it. */
+    fun distanceTo(py: Float): Float {
+        val bottom = y + layout.getLineBottom(endLine - 1) - layout.getLineTop(firstLine)
+        return when {
+            py < y -> y - py
+            py > bottom -> py - bottom
+            else -> 0f
+        }
+    }
+
+    /** The word at [px], [py], or on the line nearest it, the word nearest along the line. */
+    fun wordNear(px: Float, py: Float): WordRange? {
+        val top = layout.getLineTop(firstLine)
+        val ly = (py - y + top).toInt().coerceIn(top, layout.getLineBottom(endLine - 1) - 1)
+        val line = layout.getLineForVertical(ly).coerceIn(firstLine, endLine - 1)
+        val start = layout.getLineStart(line)
+        val end = visibleEnd(line)
+        if (start >= end) return null
+        val lx = (px - x).coerceIn(horizontal(line, start), horizontal(line, end))
+        val text = layout.text
+        val token = Words.at(text, offsetAt(line, lx))?.takeIf { it.start < end && it.end > start }
+            ?: Words.tokens(text, start, end).minByOrNull { abs((horizontal(line, it.start) + horizontal(line, it.end)) / 2 - lx) }
+            ?: return null
+        return WordRange(blockStart + token.start, blockStart + token.end)
+    }
+
+    /** The word chapter offset [offset] is in, if this slice has it. */
+    fun wordAround(offset: Int): WordRange? {
+        if (!covers(offset)) return null
+        val token = Words.at(layout.text, offset - blockStart) ?: return null
+        return WordRange(blockStart + token.start, blockStart + token.end)
+    }
+
+    /** The part of chapter offsets [start] until [end] in this slice: its text, and where it is drawn on the page. */
+    fun part(start: Int, end: Int): Pair<String, List<RectF>>? {
+        val from = max(start - blockStart, this.from)
+        val until = min(end - blockStart, to)
+        if (from >= until) return null
+        val top = layout.getLineTop(firstLine)
+        val rects = rects(from, until).map { RectF(it.left + x, it.top - top + y, it.right + x, it.bottom - top + y) }
+        return layout.text.subSequence(from, until).toString() to rects
+    }
+
+    /** The sentence chapter offsets [start] until [end] begin in. */
+    fun sentence(start: Int, end: Int): String {
+        val length = layout.text.length
+        return Words.sentenceAround(layout.text, (start - blockStart).coerceIn(0, length), (end - blockStart).coerceIn(0, length))
+    }
+
+    fun startsSentence(offset: Int): Boolean = Words.startsSentence(layout.text, (offset - blockStart).coerceIn(0, layout.text.length))
+
+    /** Where the paragraph's [start] until [end] is drawn on this slice's lines, in the layout's coordinates: a rectangle a line. */
+    private fun rects(start: Int, end: Int): List<RectF> = buildList {
+        for (line in firstLine until endLine) {
+            val from = max(start, layout.getLineStart(line))
+            val until = min(end, visibleEnd(line))
+            if (from >= until) continue
+            add(RectF(horizontal(line, from), layout.getLineTop(line).toFloat(), horizontal(line, until), layout.getLineBottom(line).toFloat()))
+        }
+    }
 
     // Android draws a justified line with its spaces widened, but getPrimaryHorizontal and
     // getOffsetForHorizontal measure it as if they were not, so anything placed by them drifts
@@ -254,13 +372,13 @@ private class TextSlice(
 }
 
 private class ImageItem(val bitmap: Bitmap?, val rect: RectF) : PageItem {
-    override fun draw(canvas: Canvas, marker: Marker?) {
+    override fun draw(canvas: Canvas, marker: Marker?, highlight: Highlight?) {
         if (bitmap != null) canvas.drawBitmap(bitmap, null, rect, imagePaint)
     }
 }
 
 private class RuleItem(val x0: Float, val x1: Float, val y: Float, val paint: Paint) : PageItem {
-    override fun draw(canvas: Canvas, marker: Marker?) = canvas.drawLine(x0, y, x1, y, paint)
+    override fun draw(canvas: Canvas, marker: Marker?, highlight: Highlight?) = canvas.drawLine(x0, y, x1, y, paint)
 }
 
 private val imagePaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
