@@ -49,6 +49,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -215,10 +216,24 @@ fun EntryCard(
                             }
                         }
                     }
-                    if (actions.isNotEmpty()) QuickActionRow(actions, actionStore, onAction, onConfigureActions)
+                    // One row across the card: the quick actions on the left, another meaning on the right.
                     val first = shown.entries.firstOrNull()
-                    if (first != null && onAddAnother != null) {
-                        TextButton(onClick = { onAddAnother(first) }) { Text("Add another meaning") }
+                    val addAnother = if (first != null && onAddAnother != null) ({ onAddAnother(first) }) else null
+                    if (actions.isNotEmpty() || addAnother != null) {
+                        Row(Modifier.fillMaxWidth().padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.weight(1f)) {
+                                if (actions.isNotEmpty()) {
+                                    QuickActionRow(actions, actionStore, onAction, onConfigureActions, buttonSize = 48.dp, iconSize = 28.dp)
+                                }
+                            }
+                            if (addAnother != null) {
+                                Labelled("Add another meaning") {
+                                    FilledTonalIconButton(onClick = addAnother) {
+                                        Icon(painterResource(R.drawable.ic_add), contentDescription = "Add another meaning")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
