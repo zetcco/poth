@@ -26,6 +26,10 @@ data class ReadingRules(
     val sessionGapMillis: Long = 5 * 60_000,
     /** A sitting with less reading than this was a glance, and is left out altogether. */
     val minSessionMillis: Long = 60_000,
+    /** How many pages it takes to measure the reader's own speed. */
+    val speedPages: Int = 20,
+    /** Speed is measured from pages read from this time on (milliseconds since the epoch), so it can be measured afresh. */
+    val speedSince: Long = 0,
 )
 
 data class DayStats(val date: LocalDate, val millis: Long, val pages: Int, val words: Int)
@@ -37,6 +41,9 @@ class ReadingSummary(
     val days: Map<LocalDate, DayStats>,
     val books: Map<String, BookStats>,
     val wordsPerMinute: Double,
+    /** How many pages have measured the speed; until there are enough, it is the default. */
+    val speedPages: Int,
+    val speedMeasured: Boolean,
 ) {
     fun minutesOn(date: LocalDate): Long = (days[date]?.millis ?: 0) / 60_000
 
@@ -67,7 +74,9 @@ data class Streak(val current: Int, val longest: Int)
 
 object ReadingStats {
     fun summarize(views: List<PageView>, zone: ZoneId, rules: ReadingRules = ReadingRules()): ReadingSummary {
-        val wpm = wordsPerMinute(views, rules)
+        val speeds = speeds(views, rules)
+        val measured = speeds.size >= rules.speedPages
+        val wpm = if (measured) speeds[speeds.size / 2] else rules.defaultWordsPerMinute
         val sorted = views.sortedBy { it.shownAt }
 
         // Sittings: page views of one book with no long gap between them.
@@ -99,7 +108,7 @@ object ReadingStats {
                 )
             }
         }
-        return ReadingSummary(days, books, wpm)
+        return ReadingSummary(days, books, wpm, speeds.size, measured)
     }
 
     /** How much of [view] counts as reading, or null if it was only glanced at. */
@@ -111,17 +120,14 @@ object ReadingStats {
     }
 
     /**
-     * The reader's own speed: the median over pages turned forward with a fair amount of text,
-     * leaving out ones barely seen or left open. The default until there are 20 such pages.
+     * The speeds the reader's own is the median of: pages turned forward with a fair amount of
+     * text, leaving out ones barely seen or left open. Slowest first.
      */
-    internal fun wordsPerMinute(views: List<PageView>, rules: ReadingRules): Double {
-        val speeds = views
-            .filter { it.arrivedBy == "next" && it.words >= 100 }
-            .map { it.words / (max(1, it.hiddenAt - it.shownAt) / 60_000.0) }
-            .filter { it in 60.0..1_000.0 }
-            .sorted()
-        return if (speeds.size < 20) rules.defaultWordsPerMinute else speeds[speeds.size / 2]
-    }
+    internal fun speeds(views: List<PageView>, rules: ReadingRules): List<Double> = views
+        .filter { it.arrivedBy == "next" && it.words >= 100 && it.shownAt >= rules.speedSince }
+        .map { it.words / (max(1, it.hiddenAt - it.shownAt) / 60_000.0) }
+        .filter { it in 60.0..1_000.0 }
+        .sorted()
 
     /** The heatmap's shade for a day: 0 for none, then up to 15 minutes, 30, an hour, and more. */
     fun level(minutes: Long): Int = when {

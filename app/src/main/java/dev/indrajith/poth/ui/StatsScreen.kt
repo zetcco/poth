@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
@@ -28,9 +29,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -51,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.indrajith.poth.Graph
 import dev.indrajith.poth.R
+import dev.indrajith.poth.stats.ReadingRules
 import dev.indrajith.poth.stats.ReadingStats
 import dev.indrajith.poth.stats.ReadingSummary
 import java.time.DayOfWeek
@@ -91,9 +95,11 @@ fun heatColors() = HeatColors(
 fun StatsScreen(graph: Graph, onBack: () -> Unit) {
     val zone = remember { ZoneId.systemDefault() }
     val today = remember { LocalDate.now(zone) }
-    val summary by produceState<ReadingSummary?>(null) {
-        value = withContext(Dispatchers.IO) { ReadingStats.summarize(graph.log.since(), zone) }
+    var speedSince by remember { mutableLongStateOf(graph.prefs.speedSince) }
+    val summary by produceState<ReadingSummary?>(null, speedSince) {
+        value = withContext(Dispatchers.IO) { graph.readingSummary(zone) }
     }
+    var measuringAgain by remember { mutableStateOf(false) }
     val books by graph.books.all.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -122,7 +128,14 @@ fun StatsScreen(graph: Graph, onBack: () -> Unit) {
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Tile("Streak", if (streak.current == 1) "1 day" else "${streak.current} days", Modifier.weight(1f), "Best: ${streak.longest}")
-                Tile("Speed", "${stats.wordsPerMinute.roundToInt()} wpm", Modifier.weight(1f))
+                // Tapped, it offers to measure the speed afresh, as when pages were skimmed.
+                Tile(
+                    "Speed",
+                    if (stats.speedMeasured) "${stats.wordsPerMinute.roundToInt()} wpm" else "Measuring",
+                    Modifier.weight(1f),
+                    if (stats.speedMeasured) "From ${stats.speedPages} pages" else "${stats.speedPages} of ${ReadingRules().speedPages} pages",
+                    onClick = { measuringAgain = true },
+                )
             }
 
             Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(24.dp)) {
@@ -169,16 +182,39 @@ fun StatsScreen(graph: Graph, onBack: () -> Unit) {
             )
         }
     }
+    if (measuringAgain) {
+        AlertDialog(
+            onDismissRequest = { measuringAgain = false },
+            title = { Text("Measure speed again?") },
+            text = { Text("The pages read so far are set aside, and your speed is measured again over the next ${ReadingRules().speedPages} pages you read.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val now = System.currentTimeMillis()
+                    graph.prefs.speedSince = now
+                    speedSince = now
+                    measuringAgain = false
+                }) { Text("Measure again") }
+            },
+            dismissButton = { TextButton(onClick = { measuringAgain = false }) { Text("Cancel") } },
+        )
+    }
 }
 
 @Composable
-private fun Tile(label: String, value: String, modifier: Modifier = Modifier, note: String? = null) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(24.dp), modifier = modifier) {
+private fun Tile(label: String, value: String, modifier: Modifier = Modifier, note: String? = null, onClick: (() -> Unit)? = null) {
+    val content = @Composable {
         Column(Modifier.padding(16.dp)) {
             Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(value, style = MaterialTheme.typography.headlineSmall)
             if (note != null) Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+    val color = MaterialTheme.colorScheme.surfaceContainer
+    val shape = RoundedCornerShape(24.dp)
+    if (onClick == null) {
+        Surface(color = color, shape = shape, modifier = modifier) { content() }
+    } else {
+        Surface(onClick = onClick, color = color, shape = shape, modifier = modifier) { content() }
     }
 }
 

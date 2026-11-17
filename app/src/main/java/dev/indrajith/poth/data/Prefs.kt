@@ -11,4 +11,9 @@ class Prefs(context: Context) {
     var rotationLocked: Boolean
         get() = sp.getBoolean("rotationLocked", false)
         set(value) = sp.edit().putBoolean("rotationLocked", value).apply()
+
+    /** Reading speed is measured from pages read since this time (milliseconds since the epoch). */
+    var speedSince: Long
+        get() = sp.getLong("speedSince", 0)
+        set(value) = sp.edit().putLong("speedSince", value).apply()
 }

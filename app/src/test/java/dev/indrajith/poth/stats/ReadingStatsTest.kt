@@ -5,7 +5,9 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReadingStatsTest {
@@ -85,10 +87,29 @@ class ReadingStatsTest {
 
     @Test
     fun readingSpeedIsMeasuredOnceThereAreEnoughPages() {
-        assertEquals(230.0, ReadingStats.wordsPerMinute(pages(at(16, 20), 10, seconds = 30), rules), 0.01)
+        val few = ReadingStats.summarize(pages(at(16, 20), 10, seconds = 30), zone)
+        assertEquals(230.0, few.wordsPerMinute, 0.01)
+        assertEquals(10, few.speedPages)
+        assertFalse(few.speedMeasured)
         // 230 words in 30 s is 460 wpm; a page left open and a jump are not measured.
         val many = pages(at(16, 20), 25, seconds = 30) + view(at(16, 22), 900) + view(at(16, 23), 5, arrivedBy = "jump")
-        assertEquals(460.0, ReadingStats.wordsPerMinute(many, rules), 0.01)
+        val summary = ReadingStats.summarize(many, zone)
+        assertEquals(460.0, summary.wordsPerMinute, 0.01)
+        assertEquals(25, summary.speedPages)
+        assertTrue(summary.speedMeasured)
+    }
+
+    @Test
+    fun speedMeasuredAfreshLeavesOutEarlierPages() {
+        // 25 skimmed pages, then the speed is measured again from 21:00: 22 pages at 115 wpm.
+        val views = pages(at(16, 20), 25, seconds = 30) + pages(at(16, 21), 22, seconds = 120)
+        val summary = ReadingStats.summarize(views, zone, ReadingRules(speedSince = at(16, 21)))
+        assertEquals(115.0, summary.wordsPerMinute, 0.01)
+        assertEquals(22, summary.speedPages)
+        // Fewer than 20 pages since: the default again, until there are enough.
+        val early = ReadingStats.summarize(views.take(30), zone, ReadingRules(speedSince = at(16, 21)))
+        assertEquals(230.0, early.wordsPerMinute, 0.01)
+        assertEquals(5, early.speedPages)
     }
 
     @Test

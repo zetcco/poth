@@ -13,7 +13,11 @@ import dev.indrajith.poth.data.PothDatabase
 import dev.indrajith.poth.data.Prefs
 import dev.indrajith.poth.data.ReadingLog
 import dev.indrajith.poth.data.Shelves
+import dev.indrajith.poth.stats.ReadingRules
+import dev.indrajith.poth.stats.ReadingStats
+import dev.indrajith.poth.stats.ReadingSummary
 import java.io.File
+import java.time.ZoneId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,7 +37,11 @@ class Graph(
     val quickActions: QuickActions,
     val shelves: Shelves,
     val covers: Covers,
-)
+) {
+    /** Reading as the rules count it, from page views since [since]. Call off the main thread. */
+    fun readingSummary(zone: ZoneId, since: Long = 0): ReadingSummary =
+        ReadingStats.summarize(log.since(since), zone, ReadingRules(speedSince = prefs.speedSince))
+}
 
 interface GraphOwner {
     val graph: Graph

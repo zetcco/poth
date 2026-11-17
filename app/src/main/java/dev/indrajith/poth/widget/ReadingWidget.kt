@@ -73,7 +73,7 @@ class ReadingWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val zone = ZoneId.systemDefault()
         val yearAgo = System.currentTimeMillis() - 400L * 24 * 60 * 60 * 1000
-        val summary = withContext(Dispatchers.IO) { ReadingStats.summarize(context.graph().log.since(yearAgo), zone) }
+        val summary = withContext(Dispatchers.IO) { context.graph().readingSummary(zone, since = yearAgo) }
         val today = LocalDate.now(zone)
         provideContent { Content(summary, today) }
     }

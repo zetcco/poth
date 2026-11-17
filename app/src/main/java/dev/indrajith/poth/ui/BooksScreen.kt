@@ -102,7 +102,7 @@ fun BooksScreen(graph: Graph, onOpen: (String) -> Unit, onStats: () -> Unit, onD
     val shelves by produceState(emptyList<Shelf>(), shelfChanges) { value = withContext(Dispatchers.IO) { graph.shelves.all() } }
     val zone = remember { ZoneId.systemDefault() }
     val summary by produceState<ReadingSummary?>(null, books) {
-        value = withContext(Dispatchers.IO) { ReadingStats.summarize(graph.log.since(), zone) }
+        value = withContext(Dispatchers.IO) { graph.readingSummary(zone) }
     }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
