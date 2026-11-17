@@ -7,9 +7,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -167,7 +165,7 @@ fun EntryCard(
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val maxCardHeight = maxHeight * 0.7f
-        AnimatedVisibility(visible = open, enter = fadeIn(), exit = fadeOut()) {
+        AnimatedVisibility(visible = open, enter = quickFadeIn(), exit = quickFadeOut()) {
             Box(
                 Modifier
                     .fillMaxSize()
@@ -177,8 +175,8 @@ fun EntryCard(
         }
         AnimatedVisibility(
             visible = open,
-            enter = slideInVertically { it },
-            exit = slideOutVertically { it },
+            enter = quickSlideIn { it },
+            exit = quickSlideOut { it },
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             val scroll = rememberScrollState()
@@ -202,8 +200,8 @@ fun EntryCard(
                         contentKey = { page -> page.depth to page.entries.map(Entry::id) },
                         transitionSpec = {
                             val forward = targetState.depth >= initialState.depth
-                            val enter = slideInHorizontally(tween(260)) { if (forward) it / 4 else -it / 4 } + fadeIn(tween(260))
-                            val exit = slideOutHorizontally(tween(200)) { if (forward) -it / 4 else it / 4 } + fadeOut(tween(160))
+                            val enter = slideInHorizontally(tween(180)) { if (forward) it / 4 else -it / 4 } + fadeIn(tween(180))
+                            val exit = slideOutHorizontally(tween(140)) { if (forward) -it / 4 else it / 4 } + fadeOut(tween(110))
                             enter togetherWith exit
                         },
                         label = "card",
@@ -305,8 +303,8 @@ fun EntryEditor(
     if (entry != null) shown = entry
     AnimatedVisibility(
         visible = entry != null,
-        enter = slideInVertically { it / 4 } + fadeIn(),
-        exit = slideOutVertically { it / 4 } + fadeOut(),
+        enter = quickSlideIn { it / 4 },
+        exit = quickSlideOut { it / 4 },
     ) {
         val editing = shown ?: return@AnimatedVisibility
         EditorContent(editing, shelfName, suggestedShelf, language, actions, actionStore, onAction, onConfigureActions, onSave, onDelete, onClose, linkable, place)
@@ -480,7 +478,7 @@ private fun EditorContent(
                     }
                 }
             }
-            AnimatedVisibility(visible = notesFocused && !preview, enter = fadeIn(), exit = fadeOut()) {
+            AnimatedVisibility(visible = notesFocused && !preview, enter = quickFadeIn(), exit = quickFadeOut()) {
                 LinkBar(notes, linkable, headword) { notes = it }
             }
         }

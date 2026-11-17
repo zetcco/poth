@@ -52,7 +52,7 @@ fun SelectionMenu(
     onCopy: () -> Unit,
 ) {
     val appear = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { appear.animateTo(1f, tween(140)) }
+    LaunchedEffect(Unit) { appear.animateTo(1f, tween(100)) }
     val statusBar = WindowInsets.statusBarsIgnoringVisibility
     Layout(
         content = {

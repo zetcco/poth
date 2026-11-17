@@ -2,10 +2,6 @@ package dev.indrajith.poth.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -122,8 +118,8 @@ private fun ActionIcon(action: QuickAction, store: QuickActions, modifier: Modif
 fun QuickActionsPanel(open: Boolean, store: QuickActions, onClose: () -> Unit) {
     AnimatedVisibility(
         visible = open,
-        enter = slideInVertically { it / 4 } + fadeIn(),
-        exit = slideOutVertically { it / 4 } + fadeOut(),
+        enter = quickSlideIn { it / 4 },
+        exit = quickSlideOut { it / 4 },
     ) {
         BackHandler(onBack = onClose)
         val colors = MaterialTheme.colorScheme

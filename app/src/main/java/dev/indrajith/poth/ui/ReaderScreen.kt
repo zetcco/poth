@@ -13,10 +13,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -331,8 +327,8 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
         val inChapter = current?.let { "page ${it.index + 1} of ${max(chapterPages, it.index + 1)}" }
         AnimatedVisibility(
             visible = barsVisible,
-            enter = slideInVertically { -it } + fadeIn(),
-            exit = slideOutVertically { -it } + fadeOut(),
+            enter = quickSlideIn { -it },
+            exit = quickSlideOut { -it },
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
             ReaderTopBar(
@@ -346,8 +342,8 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
         }
         AnimatedVisibility(
             visible = barsVisible,
-            enter = slideInVertically { it } + fadeIn(),
-            exit = slideOutVertically { it } + fadeOut(),
+            enter = quickSlideIn { it },
+            exit = quickSlideOut { it },
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             val pageMap = map
@@ -580,7 +576,7 @@ private class Turner(val pages: Pages) {
 
     suspend fun unzoom() {
         val from = zoom
-        animate(0f, 1f, animationSpec = tween(250, easing = FastOutSlowInEasing)) { t, _ -> zoom = from.towardsNone(t) }
+        animate(0f, 1f, animationSpec = tween(180, easing = FastOutSlowInEasing)) { t, _ -> zoom = from.towardsNone(t) }
     }
 
     /** Ends a swipe: on to the next or previous page, or back to where it was ([forward] null). */
@@ -591,10 +587,10 @@ private class Turner(val pages: Pages) {
             null -> null
         }
         if (target == null) {
-            offset.animateTo(0f, tween(180, easing = FastOutSlowInEasing))
+            offset.animateTo(0f, tween(140, easing = FastOutSlowInEasing))
             return
         }
-        offset.animateTo(if (forward == true) -width else width, tween(220, easing = FastOutSlowInEasing))
+        offset.animateTo(if (forward == true) -width else width, tween(160, easing = FastOutSlowInEasing))
         show(target, if (forward == true) Arrival.NEXT else Arrival.PREVIOUS)
     }
 }
