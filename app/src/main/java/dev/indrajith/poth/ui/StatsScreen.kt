@@ -179,7 +179,8 @@ fun StatsScreen(graph: Graph, onBack: () -> Unit) {
             }
             Text(
                 "Counted: pages on screen long enough to read, in sittings of a minute or more. Glances, and time " +
-                    "beyond three times a page's reading time, are left out.",
+                    "beyond three times a page's reading time, are left out. Speed is measured on pages read straight " +
+                    "through: not ones flipped to, peeked at, or left half read.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(vertical = 8.dp),

@@ -22,6 +22,12 @@ class ReadingStatsTest {
     private fun view(start: Long, seconds: Int, words: Int = 230, book: String = "b", arrivedBy: String = "next") =
         PageView(book, start, start + seconds * 1_000L, 0, 0, 0, words, arrivedBy)
 
+    /** One sitting from [start]: each page comes on as the one before goes, for its seconds, arrived at as given. */
+    private fun sitting(start: Long, vararg pages: Pair<Int, String>, words: Int = 200): List<PageView> {
+        var at = start
+        return pages.map { (seconds, arrivedBy) -> view(at, seconds, words, arrivedBy = arrivedBy).also { at += seconds * 1_000L } }
+    }
+
     /** Pages read one after another from [start]: each 230 words for [seconds]. */
     private fun pages(start: Long, count: Int, seconds: Int = 60, book: String = "b") =
         List(count) { view(start + it * seconds * 1_000L, seconds, book = book) }
@@ -87,29 +93,49 @@ class ReadingStatsTest {
 
     @Test
     fun readingSpeedIsMeasuredOnceThereAreEnoughPages() {
+        // The first page of a sitting and the last aren't read straight through.
         val few = ReadingStats.summarize(pages(at(16, 20), 10, seconds = 30), zone)
         assertEquals(230.0, few.wordsPerMinute, 0.01)
-        assertEquals(10, few.speedPages)
+        assertEquals(8, few.speedPages)
         assertFalse(few.speedMeasured)
         // 230 words in 30 s is 460 wpm; a page left open and a jump are not measured.
         val many = pages(at(16, 20), 25, seconds = 30) + view(at(16, 22), 900) + view(at(16, 23), 5, arrivedBy = "jump")
         val summary = ReadingStats.summarize(many, zone)
         assertEquals(460.0, summary.wordsPerMinute, 0.01)
-        assertEquals(25, summary.speedPages)
+        assertEquals(23, summary.speedPages)
         assertTrue(summary.speedMeasured)
     }
 
     @Test
+    fun onlyPagesReadStraightThroughMeasureSpeed() {
+        // 200 words a page: read in a minute, 200 wpm; skimmed in 20 s, 600 wpm.
+        val views = sitting(
+            at(16, 20),
+            *Array(21) { 60 to "next" },
+            1 to "next", 1 to "next", 1 to "next", // flipping through
+            20 to "next",                          // landed on after flipping
+            60 to "next",                          // read: it counts
+            20 to "next", 60 to "previous",        // peeked at, then gone back from
+            20 to "next",                          // left half read when the book was closed
+        )
+        val summary = ReadingStats.summarize(views, zone)
+        // 20 of the first 21 (the first has no page read before it), and the one after landing.
+        assertEquals(21, summary.speedPages)
+        assertEquals(200.0, summary.wordsPerMinute, 0.01)
+    }
+
+    @Test
     fun speedMeasuredAfreshLeavesOutEarlierPages() {
-        // 25 skimmed pages, then the speed is measured again from 21:00: 22 pages at 115 wpm.
+        // 25 skimmed pages, then the speed is measured again from 21:00: 22 pages at 115 wpm, 20
+        // of them read straight through.
         val views = pages(at(16, 20), 25, seconds = 30) + pages(at(16, 21), 22, seconds = 120)
         val summary = ReadingStats.summarize(views, zone, ReadingRules(speedSince = at(16, 21)))
         assertEquals(115.0, summary.wordsPerMinute, 0.01)
-        assertEquals(22, summary.speedPages)
+        assertEquals(20, summary.speedPages)
         // Fewer than 20 pages since: the default again, until there are enough.
         val early = ReadingStats.summarize(views.take(30), zone, ReadingRules(speedSince = at(16, 21)))
         assertEquals(230.0, early.wordsPerMinute, 0.01)
-        assertEquals(5, early.speedPages)
+        assertEquals(3, early.speedPages)
     }
 
     @Test

@@ -4,6 +4,7 @@ import dev.indrajith.poth.data.PageView
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -120,14 +121,29 @@ object ReadingStats {
     }
 
     /**
-     * The speeds the reader's own is the median of: pages turned forward with a fair amount of
-     * text, leaving out ones barely seen or left open. Slowest first.
+     * The speeds the reader's own is the median of, slowest first: pages read straight through,
+     * with a fair amount of text. Such a page was turned forward to from a page that was read,
+     * not flipped past, and turned forward from in turn, so it was finished: not peeked at and
+     * gone back from, nor left half read. Ones barely seen or left open are left out too.
      */
-    internal fun speeds(views: List<PageView>, rules: ReadingRules): List<Double> = views
-        .filter { it.arrivedBy == "next" && it.words >= 100 && it.shownAt >= rules.speedSince }
-        .map { it.words / (max(1, it.hiddenAt - it.shownAt) / 60_000.0) }
-        .filter { it in 60.0..1_000.0 }
-        .sorted()
+    internal fun speeds(views: List<PageView>, rules: ReadingRules): List<Double> {
+        val sorted = views.sortedBy { it.shownAt }
+        return sorted.indices
+            .filter { i ->
+                val view = sorted[i]
+                val before = sorted.getOrNull(i - 1)
+                val after = sorted.getOrNull(i + 1)
+                view.arrivedBy == "next" && view.words >= 100 && view.shownAt >= rules.speedSince &&
+                    before != null && follows(before, view) && before.hiddenAt - before.shownAt >= rules.minPageMillis &&
+                    after != null && follows(view, after) && after.arrivedBy == "next"
+            }
+            .map { sorted[it].words / (max(1, sorted[it].hiddenAt - sorted[it].shownAt) / 60_000.0) }
+            .filter { it in 60.0..1_000.0 }
+            .sorted()
+    }
+
+    /** Whether [next] came on screen as [page] went, in the same book. */
+    private fun follows(page: PageView, next: PageView) = next.bookId == page.bookId && abs(next.shownAt - page.hiddenAt) < 1_000
 
     /** The heatmap's shade for a day: 0 for none, then up to 15 minutes, 30, an hour, and more. */
     fun level(minutes: Long): Int = when {
