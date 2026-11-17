@@ -68,7 +68,7 @@ fun DictionaryScreen(graph: Graph, onBack: () -> Unit) {
     val shelves by produceState(emptyList<Shelf>(), shelfChanges) { value = withContext(Dispatchers.IO) { graph.shelves.all() } }
     val entries = loaded.orEmpty()
     var query by rememberSaveable { mutableStateOf("") }
-    var cardIds by remember { mutableStateOf(emptyList<Long>()) }
+    val trail = remember { CardTrail() }
     var editing by remember { mutableStateOf<Entry?>(null) }
     val context = LocalContext.current
 
@@ -120,33 +120,33 @@ fun DictionaryScreen(graph: Graph, onBack: () -> Unit) {
                 else -> LazyColumn(contentPadding = padding, modifier = Modifier.fillMaxSize()) {
                     for (group in groups) {
                         stickyHeader(key = "place:${group.place}") { PlaceHeader(group.place, group.entries.size) }
-                        items(group.entries, key = { it.id }) { entry -> EntryRow(entry) { cardIds = listOf(entry.id) } }
+                        items(group.entries, key = { it.id }) { entry -> EntryRow(entry) { trail.open(listOf(entry.id)) } }
                     }
                 }
             }
         }
 
         EntryCard(
-            entries = entries.filter { it.id in cardIds },
+            trail = trail,
+            entries = entries,
             scopeLabel = ::place,
             actions = emptyList(),
             actionStore = graph.quickActions,
             onAction = {},
             onConfigureActions = {},
             onEdit = { entry ->
-                cardIds = emptyList()
+                trail.close()
                 editing = entry
             },
             onAddAnother = null,
             onEntryLink = { target ->
                 val ids = matcher.lookup(target)
                 if (ids.isNotEmpty()) {
-                    cardIds = ids
+                    trail.follow(ids)
                 } else {
                     Toast.makeText(context, "No entry for “$target” yet. Hold the word in a book to write one.", Toast.LENGTH_LONG).show()
                 }
             },
-            onClose = { cardIds = emptyList() },
         )
         // Kept while the editor slides away, so it doesn't change on the way out.
         var editingPlace by remember { mutableStateOf("") }

@@ -1,11 +1,16 @@
 package dev.indrajith.poth.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,6 +21,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -25,11 +31,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsIgnoringVisibility
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -55,6 +63,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -89,13 +98,54 @@ import dev.indrajith.poth.dictionary.EntryLinks
 import kotlinx.coroutines.launch
 
 /**
- * The entries for a tapped word, the most specific first, over the bottom of the page. Shown
- * while [entries] is not empty; Back or a tap above it closes it. Without [actions] there are no
+ * Which entries the card shows, and the ones links were followed from, so Back can return
+ * through them. Opening the card for a word starts afresh.
+ */
+@Stable
+class CardTrail {
+    /** Each step's entries, the one shown last. Empty while the card is closed. */
+    var steps by mutableStateOf(emptyList<List<Long>>())
+        private set
+
+    /** The entries on the card now. */
+    val ids: List<Long> get() = steps.lastOrNull().orEmpty()
+
+    /** The entries Back returns to, if a link was followed to get here. */
+    val previous: List<Long>? get() = steps.getOrNull(steps.size - 2)
+
+    fun open(ids: List<Long>) {
+        steps = listOf(ids)
+    }
+
+    /** Follows a link to [ids]; a link to the entries already shown goes nowhere. */
+    fun follow(ids: List<Long>) {
+        if (ids != this.ids) steps = steps + listOf(ids)
+    }
+
+    fun back() {
+        steps = steps.dropLast(1)
+    }
+
+    fun close() {
+        steps = emptyList()
+    }
+}
+
+/** What the card shows: its entries, how many links deep, and where Back goes. */
+// Compared by value: it is written during composition, so an equal one must not count as a change.
+private data class CardPage(val entries: List<Entry>, val depth: Int, val previous: String?)
+
+/**
+ * The entries of [trail], the most specific first, over the bottom of the screen. [entries] are
+ * all the entries it can show. A link in an entry leads on to the entries it names
+ * ([onEntryLink]); Back, or the button at the top, goes back through the links followed, and
+ * from the first entry closes the card, as a tap above it does. Without [actions] there are no
  * quick actions, and without [onAddAnother] no way to add another meaning.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EntryCard(
+    trail: CardTrail,
     entries: List<Entry>,
     scopeLabel: (Entry) -> String,
     actions: List<QuickAction>,
@@ -105,13 +155,14 @@ fun EntryCard(
     onEdit: (Entry) -> Unit,
     onAddAnother: ((Entry) -> Unit)?,
     onEntryLink: (String) -> Unit,
-    onClose: () -> Unit,
 ) {
-    val open = entries.isNotEmpty()
+    val current = entries.filter { it.id in trail.ids }
+    val open = current.isNotEmpty()
+    val previous = trail.previous?.let { ids -> entries.firstOrNull { it.id in ids }?.headword }
     // Kept while the card slides away, so it does not empty out on the way.
-    var shown by remember { mutableStateOf(entries) }
-    if (open) shown = entries
-    BackHandler(enabled = open, onBack = onClose)
+    var shown by remember { mutableStateOf(CardPage(current, trail.steps.size, previous)) }
+    if (open) shown = CardPage(current, trail.steps.size, previous)
+    BackHandler(enabled = open) { if (previous != null) trail.back() else trail.close() }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val maxCardHeight = maxHeight * 0.7f
@@ -120,7 +171,7 @@ fun EntryCard(
                 Modifier
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
-                    .pointerInput(Unit) { detectTapGestures { onClose() } },
+                    .pointerInput(Unit) { detectTapGestures { trail.close() } },
             )
         }
         AnimatedVisibility(
@@ -129,6 +180,9 @@ fun EntryCard(
             exit = slideOutVertically { it },
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
+            val scroll = rememberScrollState()
+            // Each entry followed to starts at its top.
+            LaunchedEffect(shown.depth, shown.entries.map(Entry::id)) { scroll.scrollTo(0) }
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
@@ -136,23 +190,53 @@ fun EntryCard(
             ) {
                 Column(
                     Modifier
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(scroll)
                         .windowInsetsPadding(WindowInsets.navigationBarsIgnoringVisibility.only(WindowInsetsSides.Bottom))
                         .padding(start = 24.dp, end = 12.dp, top = 20.dp, bottom = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    shown.forEachIndexed { index, entry ->
-                        if (index > 0) HorizontalDivider(Modifier.padding(end = 12.dp))
-                        EntryView(entry, scopeLabel(entry), onEdit = { onEdit(entry) }, onEntryLink = onEntryLink)
+                    // Following a link slides the next entry in from the right; going back, from the left.
+                    AnimatedContent(
+                        targetState = shown,
+                        contentKey = { page -> page.depth to page.entries.map(Entry::id) },
+                        transitionSpec = {
+                            val forward = targetState.depth >= initialState.depth
+                            val enter = slideInHorizontally(tween(260)) { if (forward) it / 4 else -it / 4 } + fadeIn(tween(260))
+                            val exit = slideOutHorizontally(tween(200)) { if (forward) -it / 4 else it / 4 } + fadeOut(tween(160))
+                            enter togetherWith exit
+                        },
+                        label = "card",
+                    ) { page ->
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (page.previous != null) BackToEntry(page.previous) { trail.back() }
+                            page.entries.forEachIndexed { index, entry ->
+                                if (index > 0) HorizontalDivider(Modifier.padding(end = 12.dp))
+                                EntryView(entry, scopeLabel(entry), onEdit = { onEdit(entry) }, onEntryLink = onEntryLink)
+                            }
+                        }
                     }
                     if (actions.isNotEmpty()) QuickActionRow(actions, actionStore, onAction, onConfigureActions)
-                    val first = shown.firstOrNull()
+                    val first = shown.entries.firstOrNull()
                     if (first != null && onAddAnother != null) {
                         TextButton(onClick = { onAddAnother(first) }) { Text("Add another meaning") }
                     }
                 }
             }
         }
+    }
+}
+
+/** Back to the entry a link was followed from, by name. */
+@Composable
+private fun BackToEntry(headword: String, onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        contentPadding = PaddingValues(start = 8.dp, end = 16.dp),
+        modifier = Modifier.offset(x = (-8).dp),
+    ) {
+        Icon(painterResource(R.drawable.ic_back), contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(headword, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

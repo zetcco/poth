@@ -197,7 +197,7 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
     val shelf by produceState<Shelf?>(null, shelfChanges) { value = withContext(Dispatchers.IO) { graph.shelves.of(bookId) } }
     val suggestedShelf = remember(bookId) { Words.suggestShelf(book.title, book.series) }
     val marker = remember(entries) { EntryMarker(entries) }
-    var cardIds by remember { mutableStateOf(emptyList<Long>()) }
+    val trail = remember { CardTrail() }
     var editing by remember { mutableStateOf<Entry?>(null) }
     val haptics = LocalHapticFeedback.current
 
@@ -289,7 +289,7 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
                 val hit = page.wordAt(x, y, marker)
                 if (hit != null && hit.marks.isNotEmpty()) {
                     lastSentence = hit.sentence
-                    cardIds = hit.marks.flatMap { it.entries }.distinct()
+                    trail.open(hit.marks.flatMap { it.entries }.distinct())
                 } else {
                     barsVisible = !barsVisible
                     if (!barsVisible) jumpedFrom = null
@@ -405,7 +405,8 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
         }
 
         EntryCard(
-            entries = entries.filter { it.id in cardIds },
+            trail = trail,
+            entries = entries,
             scopeLabel = { entry ->
                 when (entry.scope) {
                     Scope.BOOK -> "This book"
@@ -415,28 +416,27 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
             },
             actions = actions,
             actionStore = quickActions,
-            onAction = { action -> runAction(action, entries.firstOrNull { it.id in cardIds }?.headword.orEmpty()) },
+            onAction = { action -> runAction(action, entries.firstOrNull { it.id in trail.ids }?.headword.orEmpty()) },
             onConfigureActions = { configuringActions = true },
             onEdit = { entry ->
-                cardIds = emptyList()
+                trail.close()
                 editing = entry
             },
             onAddAnother = { entry ->
-                cardIds = emptyList()
+                trail.close()
                 val other = if (entry.scope == Scope.LIBRARY) (if (shelf != null || suggestedShelf.isNotEmpty()) Scope.SHELF else Scope.BOOK) else Scope.LIBRARY
                 editing = Entry(headword = entry.headword, scope = other)
             },
             onEntryLink = { target ->
                 val ids = marker.matcher.lookup(target)
                 if (ids.isNotEmpty()) {
-                    cardIds = ids
+                    trail.follow(ids)
                 } else {
-                    cardIds = emptyList()
+                    trail.close()
                     val guess = Words.suggestScope(target, startsSentence = false, appearsInLowercase = false, onShelf = shelf != null || suggestedShelf.isNotEmpty())
                     editing = Entry(headword = target, scope = guess)
                 }
             },
-            onClose = { cardIds = emptyList() },
         )
         EntryEditor(
             entry = editing,
