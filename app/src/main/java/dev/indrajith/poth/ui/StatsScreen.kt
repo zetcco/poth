@@ -100,6 +100,8 @@ fun StatsScreen(graph: Graph, onBack: () -> Unit) {
         value = withContext(Dispatchers.IO) { graph.readingSummary(zone) }
     }
     var measuringAgain by remember { mutableStateOf(false) }
+    val trackingPaused by graph.prefs.trackingPaused.collectAsStateWithLifecycle()
+    var confirmingTracking by remember { mutableStateOf(false) }
     val books by graph.books.all.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -107,6 +109,7 @@ fun StatsScreen(graph: Graph, onBack: () -> Unit) {
             TopAppBar(
                 title = { Text("Reading") },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(painterResource(R.drawable.ic_back), contentDescription = "Back") } },
+                actions = { TrackingButton(trackingPaused, onClick = { confirmingTracking = true }) },
             )
         },
     ) { padding ->
@@ -120,6 +123,7 @@ fun StatsScreen(graph: Graph, onBack: () -> Unit) {
             Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            if (trackingPaused) TrackingPaused(onResume = { confirmingTracking = true })
             val week = (0L..6L).sumOf { stats.minutesOn(today.minusDays(it)) }
             val streak = stats.streak(today)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -181,6 +185,16 @@ fun StatsScreen(graph: Graph, onBack: () -> Unit) {
                 modifier = Modifier.padding(vertical = 8.dp),
             )
         }
+    }
+    if (confirmingTracking) {
+        ConfirmTracking(
+            pause = !trackingPaused,
+            onConfirm = {
+                graph.prefs.pauseTracking(!trackingPaused)
+                confirmingTracking = false
+            },
+            onDismiss = { confirmingTracking = false },
+        )
     }
     if (measuringAgain) {
         AlertDialog(

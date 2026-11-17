@@ -2,6 +2,8 @@ package dev.indrajith.poth.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /** Small settings in SharedPreferences. */
 class Prefs(context: Context) {
@@ -16,4 +18,14 @@ class Prefs(context: Context) {
     var speedSince: Long
         get() = sp.getLong("speedSince", 0)
         set(value) = sp.edit().putLong("speedSince", value).apply()
+
+    private val _trackingPaused = MutableStateFlow(sp.getBoolean("trackingPaused", false))
+
+    /** While true, reading is not recorded at all: pages read are not in the stats. */
+    val trackingPaused: StateFlow<Boolean> = _trackingPaused
+
+    fun pauseTracking(paused: Boolean) {
+        sp.edit().putBoolean("trackingPaused", paused).apply()
+        _trackingPaused.value = paused
+    }
 }

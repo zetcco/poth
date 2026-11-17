@@ -175,9 +175,20 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
     var barsVisible by rememberSaveable { mutableStateOf(false) }
     var contentsOpen by rememberSaveable { mutableStateOf(false) }
     var rotationLocked by remember { mutableStateOf(graph.prefs.rotationLocked) }
+    // While tracking is paused, page views are dropped rather than stored.
+    val trackingPaused by graph.prefs.trackingPaused.collectAsStateWithLifecycle()
     val clock = remember(bookId) {
-        PageClock(bookId, record = { view -> graph.scope.launch(Dispatchers.IO) { graph.log.add(view) } })
+        PageClock(bookId, record = { view ->
+            if (!graph.prefs.trackingPaused.value) graph.scope.launch(Dispatchers.IO) { graph.log.add(view) }
+        })
     }
+    // The page view so far ends as it was (kept or not), and the rest of it goes the new way.
+    fun pauseTracking(paused: Boolean) {
+        clock.pause()
+        graph.prefs.pauseTracking(paused)
+        clock.resume()
+    }
+    var confirmingTracking by remember { mutableStateOf(false) }
     // When reading stops, the widget catches up (once the last page view is written).
     val appContext = LocalContext.current.applicationContext
     fun refreshWidget() = graph.scope.launch {
@@ -353,6 +364,8 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
                     rotationLocked = !rotationLocked
                     graph.prefs.rotationLocked = rotationLocked
                 },
+                trackingPaused = trackingPaused,
+                onTracking = { confirmingTracking = true },
                 scrubber = if (pageMap != null && number != null) {
                     ScrubberModel(
                         total = pageMap.total,
@@ -515,6 +528,16 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
             linkable = entries,
         )
         QuickActionsPanel(open = configuringActions, store = quickActions, onClose = { configuringActions = false })
+        if (confirmingTracking) {
+            ConfirmTracking(
+                pause = !trackingPaused,
+                onConfirm = {
+                    pauseTracking(!trackingPaused)
+                    confirmingTracking = false
+                },
+                onDismiss = { confirmingTracking = false },
+            )
+        }
     }
 }
 

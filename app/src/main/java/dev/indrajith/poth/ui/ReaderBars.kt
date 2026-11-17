@@ -113,7 +113,7 @@ fun ReaderTopBar(
 }
 
 /**
- * The page count, rotation lock and the scrubber. While the scrubber is dragged, a bubble in
+ * The page count, the reading tracker's pause, rotation lock and the scrubber. While the scrubber is dragged, a bubble in
  * place of the page count says where letting go will go. [back] offers a way back after a jump.
  */
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -122,6 +122,8 @@ fun ReaderBottomBar(
     pageLabel: String,
     rotationLocked: Boolean,
     onRotation: () -> Unit,
+    trackingPaused: Boolean,
+    onTracking: () -> Unit,
     scrubber: ScrubberModel?,
     back: String?,
     onBackClick: () -> Unit,
@@ -164,6 +166,7 @@ fun ReaderBottomBar(
                             )
                         }
                     } else {
+                        TrackingButton(trackingPaused, onClick = onTracking, modifier = Modifier.align(Alignment.CenterStart))
                         Text(pageLabel, style = MaterialTheme.typography.titleSmall, modifier = Modifier.align(Alignment.Center))
                         IconButton(onClick = onRotation, modifier = Modifier.align(Alignment.CenterEnd)) {
                             Icon(

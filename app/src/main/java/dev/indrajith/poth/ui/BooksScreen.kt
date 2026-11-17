@@ -270,6 +270,21 @@ private fun SummaryCard(graph: Graph, last: Book?, summary: ReadingSummary?, onO
                 }
                 if (summary != null) RecentDays(summary, today, Modifier.weight(1f).height(18.dp))
             }
+            val trackingPaused by graph.prefs.trackingPaused.collectAsStateWithLifecycle()
+            var confirmingResume by remember { mutableStateOf(false) }
+            if (trackingPaused) {
+                TrackingPaused(onResume = { confirmingResume = true }, Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp))
+            }
+            if (confirmingResume) {
+                ConfirmTracking(
+                    pause = false,
+                    onConfirm = {
+                        graph.prefs.pauseTracking(false)
+                        confirmingResume = false
+                    },
+                    onDismiss = { confirmingResume = false },
+                )
+            }
         }
     }
 }
