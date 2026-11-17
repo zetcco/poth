@@ -74,10 +74,18 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-/** Back, the contents, and what is being read: title, author, section and page in it. */
+/** Back, the dictionary, the contents, and what is being read: title, author, section and page in it. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ReaderTopBar(title: String, author: String, section: String?, onBack: () -> Unit, onContents: () -> Unit, modifier: Modifier = Modifier) {
+fun ReaderTopBar(
+    title: String,
+    author: String,
+    section: String?,
+    onBack: () -> Unit,
+    onDictionary: () -> Unit,
+    onContents: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier.fillMaxWidth()) {
         Column(
             Modifier
@@ -90,6 +98,7 @@ fun ReaderTopBar(title: String, author: String, section: String?, onBack: () -> 
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) { Icon(painterResource(R.drawable.ic_back), contentDescription = "Back to books") }
                 Spacer(Modifier.weight(1f))
+                IconButton(onClick = onDictionary) { Icon(painterResource(R.drawable.ic_dictionary), contentDescription = "Dictionary") }
                 IconButton(onClick = onContents) { Icon(painterResource(R.drawable.ic_toc), contentDescription = "Contents") }
             }
             val lines = Modifier.padding(horizontal = 16.dp)

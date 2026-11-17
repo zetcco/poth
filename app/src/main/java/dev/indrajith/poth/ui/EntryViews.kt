@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -34,6 +35,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroupDefaults
@@ -44,6 +47,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,14 +63,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -77,11 +85,13 @@ import dev.indrajith.poth.data.Entry
 import dev.indrajith.poth.data.Lookup
 import dev.indrajith.poth.data.Scope
 import dev.indrajith.poth.data.Wiktionary
+import dev.indrajith.poth.dictionary.EntryLinks
 import kotlinx.coroutines.launch
 
 /**
  * The entries for a tapped word, the most specific first, over the bottom of the page. Shown
- * while [entries] is not empty; Back or a tap above it closes it.
+ * while [entries] is not empty; Back or a tap above it closes it. Without [actions] there are no
+ * quick actions, and without [onAddAnother] no way to add another meaning.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -93,7 +103,7 @@ fun EntryCard(
     onAction: (QuickAction) -> Unit,
     onConfigureActions: () -> Unit,
     onEdit: (Entry) -> Unit,
-    onAddAnother: (Entry) -> Unit,
+    onAddAnother: ((Entry) -> Unit)?,
     onEntryLink: (String) -> Unit,
     onClose: () -> Unit,
 ) {
@@ -135,8 +145,9 @@ fun EntryCard(
                         if (index > 0) HorizontalDivider(Modifier.padding(end = 12.dp))
                         EntryView(entry, scopeLabel(entry), onEdit = { onEdit(entry) }, onEntryLink = onEntryLink)
                     }
-                    QuickActionRow(actions, actionStore, onAction, onConfigureActions)
-                    shown.firstOrNull()?.let { first ->
+                    if (actions.isNotEmpty()) QuickActionRow(actions, actionStore, onAction, onConfigureActions)
+                    val first = shown.firstOrNull()
+                    if (first != null && onAddAnother != null) {
                         TextButton(onClick = { onAddAnother(first) }) { Text("Add another meaning") }
                     }
                 }
@@ -171,7 +182,8 @@ private fun EntryView(entry: Entry, scope: String, onEdit: () -> Unit, onEntryLi
  * Writing an entry: the word, other ways it is written, which books see it, and notes in
  * Markdown. Shown over the whole screen while [entry] is not null. Closing with changes asks first.
  * [onSave] gets the shelf name to put the book on when the entry is for a shelf and the book is
- * on none yet.
+ * on none yet. [linkable] are the entries offered while writing a [[link]]. With a [place], the
+ * entry stays where it shows: it can only be moved from a book.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -187,6 +199,8 @@ fun EntryEditor(
     onSave: (Entry, newShelf: String?) -> Unit,
     onDelete: (Entry) -> Unit,
     onClose: () -> Unit,
+    linkable: List<Entry> = emptyList(),
+    place: String? = null,
 ) {
     var shown by remember { mutableStateOf(entry) }
     if (entry != null) shown = entry
@@ -196,7 +210,7 @@ fun EntryEditor(
         exit = slideOutVertically { it / 4 } + fadeOut(),
     ) {
         val editing = shown ?: return@AnimatedVisibility
-        EditorContent(editing, shelfName, suggestedShelf, language, actions, actionStore, onAction, onConfigureActions, onSave, onDelete, onClose)
+        EditorContent(editing, shelfName, suggestedShelf, language, actions, actionStore, onAction, onConfigureActions, onSave, onDelete, onClose, linkable, place)
     }
 }
 
@@ -214,12 +228,16 @@ private fun EditorContent(
     onSave: (Entry, newShelf: String?) -> Unit,
     onDelete: (Entry) -> Unit,
     onClose: () -> Unit,
+    linkable: List<Entry>,
+    place: String?,
 ) {
     val colors = MaterialTheme.colorScheme
     val key = entry.id to entry.headword
     var headword by rememberSaveable(key) { mutableStateOf(entry.headword) }
     var aliases by rememberSaveable(key) { mutableStateOf(entry.aliases.joinToString(", ")) }
-    var body by rememberSaveable(key) { mutableStateOf(entry.body) }
+    var notes by rememberSaveable(key, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(entry.body)) }
+    val body = notes.text
+    var notesFocused by remember(key) { mutableStateOf(false) }
     var scope by rememberSaveable(key) { mutableStateOf(entry.scope) }
     var newShelf by rememberSaveable(key) { mutableStateOf(suggestedShelf) }
     var preview by rememberSaveable(key) { mutableStateOf(false) }
@@ -238,7 +256,7 @@ private fun EditorContent(
     // A general word is looked up straight away; names rarely are in a dictionary.
     LaunchedEffect(key) { if (entry.id == 0L && entry.scope == Scope.LIBRARY && entry.body.isBlank()) lookUp() }
 
-    val needsShelf = scope == Scope.SHELF && shelfName == null
+    val needsShelf = place == null && scope == Scope.SHELF && shelfName == null
     val edited = entry.copy(
         headword = headword.trim(),
         aliases = aliases.split(',').map(String::trim).filter(String::isNotEmpty),
@@ -287,16 +305,21 @@ private fun EditorContent(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text("Shows in", style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
-                ScopeButtons(scope) { scope = it }
-                Text(
-                    when (scope) {
-                        Scope.BOOK -> "Only this book."
-                        Scope.SHELF -> if (shelfName != null) "Every book on $shelfName." else "Every book on this book's shelf."
-                        Scope.LIBRARY -> "Every book: for general words."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant,
-                )
+                if (place != null) {
+                    Text(place, style = MaterialTheme.typography.bodyLarge)
+                    Text("To move it, edit it from a book it shows in.", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                } else {
+                    ScopeButtons(scope) { scope = it }
+                    Text(
+                        when (scope) {
+                            Scope.BOOK -> "Only this book."
+                            Scope.SHELF -> if (shelfName != null) "Every book on $shelfName." else "Every book on this book's shelf."
+                            Scope.LIBRARY -> "Every book: for general words."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
                 if (needsShelf) {
                     OutlinedTextField(
                         newShelf,
@@ -308,7 +331,7 @@ private fun EditorContent(
                     )
                 }
                 Text("Look it up", style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
-                QuickActionRow(actions, actionStore, { onAction(it, headword.trim()) }, onConfigureActions)
+                if (actions.isNotEmpty()) QuickActionRow(actions, actionStore, { onAction(it, headword.trim()) }, onConfigureActions)
                 Definitions(
                     lookup = lookup,
                     lookingUp = lookingUp,
@@ -316,7 +339,8 @@ private fun EditorContent(
                     onLookUp = ::lookUp,
                     onPick = { definition ->
                         val line = Wiktionary.markdown(definition)
-                        body = if (body.isBlank()) line else body.trimEnd() + "\n" + line
+                        val text = if (body.isBlank()) line else body.trimEnd() + "\n" + line
+                        notes = TextFieldValue(text, TextRange(text.length))
                     },
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -339,11 +363,11 @@ private fun EditorContent(
                     }
                 } else {
                     OutlinedTextField(
-                        body,
-                        { body = it },
+                        notes,
+                        { notes = it },
                         placeholder = { Text("Markdown: **bold**, *italic*, - lists, # headings, [[another entry]]") },
                         minLines = 8,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().onFocusChanged { notesFocused = it.isFocused },
                     )
                 }
                 if (entry.id != 0L) {
@@ -356,6 +380,9 @@ private fun EditorContent(
                         Text("Delete entry")
                     }
                 }
+            }
+            AnimatedVisibility(visible = notesFocused && !preview, enter = fadeIn(), exit = fadeOut()) {
+                LinkBar(notes, linkable, headword) { notes = it }
             }
         }
     }
@@ -375,6 +402,59 @@ private fun EditorContent(
             confirmButton = { TextButton(onClick = { asking = null; onDelete(entry) }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { asking = null }) { Text("Cancel") } },
         )
+    }
+}
+
+/**
+ * Above the keyboard while notes are written: a button that starts a [[link]] to another entry,
+ * or makes the selected words one. While a link is being typed, the entries it could be
+ * instead; tapping one finishes the link.
+ */
+@Composable
+private fun LinkBar(notes: TextFieldValue, entries: List<Entry>, writing: String, onChange: (TextFieldValue) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val selection = notes.selection
+    val open = if (selection.collapsed) EntryLinks.open(notes.text, selection.start) else null
+    val suggestions = remember(entries, open?.query, writing) {
+        if (open == null) emptyList() else EntryLinks.suggest(entries, open.query, writing)
+    }
+    fun change(result: Pair<String, Int>) = onChange(TextFieldValue(result.first, TextRange(result.second)))
+    val chipColors = SuggestionChipDefaults.suggestionChipColors(labelColor = colors.onSurface)
+    Surface(color = colors.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()).heightIn(min = 56.dp).padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (open == null) {
+                val selected = notes.text.substring(selection.min, selection.max).trim()
+                AssistChip(
+                    onClick = { change(EntryLinks.start(notes.text, selection.min, selection.max)) },
+                    label = { Text(if (selected.isEmpty()) "Link an entry" else "Link “${selected.take(24)}”") },
+                    leadingIcon = { Icon(painterResource(R.drawable.ic_link), contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) },
+                )
+                if (selected.isEmpty()) Text("or type [[", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+            } else {
+                for (suggestion in suggestions) {
+                    SuggestionChip(
+                        onClick = { change(EntryLinks.complete(notes.text, selection.start, open, suggestion.term)) },
+                        label = { Text(if (suggestion.term == suggestion.headword) suggestion.term else "${suggestion.term} · ${suggestion.headword}") },
+                        colors = chipColors,
+                    )
+                }
+                val typed = open.query.trim()
+                if (typed.isNotEmpty() && suggestions.none { it.term.equals(typed, ignoreCase = true) }) {
+                    // A link to an entry not written yet: tapping it later starts that entry.
+                    SuggestionChip(
+                        onClick = { change(EntryLinks.complete(notes.text, selection.start, open, typed)) },
+                        label = { Text("“$typed” (new)") },
+                        colors = chipColors,
+                    )
+                } else if (suggestions.isEmpty()) {
+                    Text("No other entries yet. Type a word, then ]]", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                }
+            }
+        }
     }
 }
 

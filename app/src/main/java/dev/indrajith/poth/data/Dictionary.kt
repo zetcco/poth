@@ -56,6 +56,12 @@ class Dictionary(private val db: PothDatabase, private val now: () -> Long = Sys
         arrayOf(bookId, bookId),
     ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.toEntry()) } }
 
+    /** Every entry, wherever it shows, by word. */
+    fun all(): List<Entry> = db.readableDatabase.rawQuery(
+        "SELECT $COLUMNS FROM entries ORDER BY headword COLLATE NOCASE, id",
+        null,
+    ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.toEntry()) } }
+
     /** Adds or updates [entry] and keeps this version of it. Returns it as saved. */
     fun save(entry: Entry, origin: Origin?): Entry {
         val at = now()

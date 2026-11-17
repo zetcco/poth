@@ -95,7 +95,7 @@ private val coverCache = HashMap<String, ImageBitmap>()
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun BooksScreen(graph: Graph, onOpen: (String) -> Unit, onStats: () -> Unit) {
+fun BooksScreen(graph: Graph, onOpen: (String) -> Unit, onStats: () -> Unit, onDictionary: () -> Unit) {
     val books by graph.books.all.collectAsStateWithLifecycle()
     val shelfChanges by graph.shelves.changes.collectAsStateWithLifecycle()
     val shelfOf by produceState(emptyMap<String, Shelf>(), shelfChanges) { value = withContext(Dispatchers.IO) { graph.shelves.byBook() } }
@@ -133,6 +133,7 @@ fun BooksScreen(graph: Graph, onOpen: (String) -> Unit, onStats: () -> Unit) {
             TopAppBar(
                 title = { Text("Poth") },
                 actions = {
+                    IconButton(onClick = onDictionary) { Icon(painterResource(R.drawable.ic_dictionary), contentDescription = "Dictionary") }
                     IconButton(onClick = onStats) { Icon(painterResource(R.drawable.ic_insights), contentDescription = "Reading stats") }
                 },
             )

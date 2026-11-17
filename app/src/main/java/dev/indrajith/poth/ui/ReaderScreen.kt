@@ -126,7 +126,7 @@ private sealed interface Opening {
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun ReaderScreen(graph: Graph, bookId: String, onBack: () -> Unit) {
+fun ReaderScreen(graph: Graph, bookId: String, onBack: () -> Unit, onDictionary: () -> Unit) {
     val opening by produceState<Opening>(Opening.Loading, bookId) {
         val result = withContext(Dispatchers.IO) {
             try {
@@ -152,14 +152,14 @@ fun ReaderScreen(graph: Graph, bookId: String, onBack: () -> Unit) {
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(32.dp),
             )
-            is Opening.Ready -> Reader(graph, bookId, state.book, state.position, onBack)
+            is Opening.Ready -> Reader(graph, bookId, state.book, state.position, onBack, onDictionary)
         }
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position, onBack: () -> Unit) {
+private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position, onBack: () -> Unit, onDictionary: () -> Unit) {
     val scope = rememberCoroutineScope()
     var position by remember { mutableStateOf(start) }
     var laidOutBefore by remember { mutableStateOf(false) }
@@ -334,6 +334,7 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
                 author = book.author,
                 section = listOfNotNull(section?.title, inChapter).joinToString(" · ").ifEmpty { null },
                 onBack = onBack,
+                onDictionary = onDictionary,
                 onContents = { contentsOpen = true },
             )
         }
@@ -466,6 +467,7 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
                 graph.scope.launch(Dispatchers.IO) { dictionary.delete(entry.id) }
             },
             onClose = { editing = null },
+            linkable = entries,
         )
         QuickActionsPanel(open = configuringActions, store = quickActions, onClose = { configuringActions = false })
     }

@@ -44,5 +44,6 @@ Built in iterations; each one ends with something usable on the phone.
 - [x] 5. Quick actions: look a word up in installed apps, prompt templates; Wiktionary definitions
 - [x] 6. Reading stats (weighted at query time; quick glances don't count), GitHub-style calendar, home-screen widget
 - [x] Library: covers, shelves, progress per book, today's reading at the top
+- [x] Whole dictionary: every entry by place, search, [[links]] suggested while writing
 - [ ] 7. Polish: search, font settings, `.md` export, backup
 - Later: images in entries, where each edit was made

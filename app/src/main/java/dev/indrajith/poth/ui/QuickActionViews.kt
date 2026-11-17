@@ -28,14 +28,18 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,7 +57,11 @@ import dev.indrajith.poth.actions.QuickAction
 import dev.indrajith.poth.actions.QuickActions
 import dev.indrajith.poth.actions.Templates
 
-/** The quick actions as chips, each with its app's icon, and a button to change them. */
+/**
+ * The quick actions as their apps' icons, and a button to change them. Holding an icon shows
+ * the action's name.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuickActionRow(
     actions: List<QuickAction>,
@@ -64,27 +72,31 @@ fun QuickActionRow(
 ) {
     Row(
         modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         for (action in actions) {
-            AssistChip(
-                onClick = { onAction(action) },
-                label = { Text(action.label) },
-                leadingIcon = { ActionIcon(action, store, Modifier.size(AssistChipDefaults.IconSize)) },
-            )
+            TooltipBox(
+                positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                tooltip = { PlainTooltip { Text(action.label) } },
+                state = rememberTooltipState(),
+            ) {
+                IconButton(onClick = { onAction(action) }, modifier = Modifier.size(52.dp)) {
+                    ActionIcon(action, store, Modifier.size(30.dp), label = action.label)
+                }
+            }
         }
         IconButton(onClick = onConfigure) { Icon(painterResource(R.drawable.ic_tune), contentDescription = "Change quick actions") }
     }
 }
 
 @Composable
-private fun ActionIcon(action: QuickAction, store: QuickActions, modifier: Modifier) {
-    val bitmap = remember(action.packageName, action.activity) { store.icon(action)?.toBitmap(96, 96)?.asImageBitmap() }
+private fun ActionIcon(action: QuickAction, store: QuickActions, modifier: Modifier, label: String? = null) {
+    val bitmap = remember(action.packageName, action.activity) { store.icon(action)?.toBitmap(120, 120)?.asImageBitmap() }
     if (bitmap != null) {
-        Image(bitmap, contentDescription = null, modifier = modifier)
+        Image(bitmap, contentDescription = label, modifier = modifier)
     } else {
-        Icon(painterResource(if (action.kind == ActionKind.SEARCH) R.drawable.ic_search else R.drawable.ic_share), contentDescription = null, modifier = modifier)
+        Icon(painterResource(if (action.kind == ActionKind.SEARCH) R.drawable.ic_search else R.drawable.ic_share), contentDescription = label, modifier = modifier)
     }
 }
 
@@ -126,7 +138,7 @@ fun QuickActionsPanel(open: Boolean, store: QuickActions, onClose: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
-                        "Chips on the dictionary card and editor. What a chip sends can use " +
+                        "Icons on the dictionary card and editor; hold one to see its name. What an action sends can use " +
                             Templates.placeholders.joinToString(", ") { "{$it}" } + ".",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant,
