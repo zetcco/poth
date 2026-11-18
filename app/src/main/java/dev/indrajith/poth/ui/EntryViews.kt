@@ -1,6 +1,9 @@
 package dev.indrajith.poth.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -11,9 +14,14 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.content.MediaType
+import androidx.compose.foundation.content.consume
+import androidx.compose.foundation.content.contentReceiver
+import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -43,6 +51,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -92,6 +102,7 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
@@ -110,15 +121,20 @@ import dev.indrajith.poth.actions.QuickActions
 import dev.indrajith.poth.data.Definition
 import dev.indrajith.poth.data.Entry
 import dev.indrajith.poth.data.Lookup
+import dev.indrajith.poth.data.NoteImages
 import dev.indrajith.poth.data.Scope
 import dev.indrajith.poth.data.Wiktionary
 import dev.indrajith.poth.dictionary.EntryLinks
 import dev.indrajith.poth.dictionary.Forms
+import dev.indrajith.poth.graph
+import java.io.InputStream
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Which entries the card shows, and the ones links were followed from, so Back can return
@@ -342,7 +358,7 @@ fun EntryEditor(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun EditorContent(
     entry: Entry,
@@ -365,8 +381,8 @@ private fun EditorContent(
     val key = entry.id to entry.headword
     var headword by rememberSaveable(key) { mutableStateOf(entry.headword) }
     var aliases by rememberSaveable(key) { mutableStateOf(entry.aliases.joinToString(", ")) }
-    var notes by rememberSaveable(key, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(entry.body)) }
-    val body = notes.text
+    val notes = rememberSaveable(key, saver = TextFieldState.Saver) { TextFieldState(entry.body) }
+    val body = notes.text.toString()
     var notesFocused by remember(key) { mutableStateOf(false) }
     var scope by rememberSaveable(key) { mutableStateOf(entry.scope) }
     var newShelf by rememberSaveable(key) { mutableStateOf(suggestedShelf) }
@@ -387,6 +403,26 @@ private fun EditorContent(
             lookedUp = word
             lookingUp = false
         }
+    }
+    // Pictures go into the notes where the cursor is, each on a line of its own, once kept.
+    val images = LocalContext.current.graph().images
+    val resolver = LocalContext.current.contentResolver
+    fun addPictures(inputs: List<InputStream>) {
+        if (inputs.isEmpty()) return
+        coroutines.launch {
+            val names = withContext(Dispatchers.IO) { inputs.mapNotNull(images::add) }
+            if (names.isEmpty()) return@launch
+            notes.edit {
+                val start = selection.min
+                val before = if (start > 0 && asCharSequence()[start - 1] != '\n') "\n" else ""
+                val text = before + names.joinToString("\n", transform = NoteImages::markdown) + "\n"
+                replace(start, selection.max, text)
+                selection = TextRange(start + text.length)
+            }
+        }
+    }
+    val pickPictures = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { uris ->
+        addPictures(uris.mapNotNull { runCatching { resolver.openInputStream(it) }.getOrNull() })
     }
     // A general word is looked up straight away; names rarely are in a dictionary.
     LaunchedEffect(key) { if (entry.id == 0L && entry.scope == Scope.LIBRARY && entry.body.isBlank()) lookUp() }
@@ -513,6 +549,9 @@ private fun EditorContent(
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Notes", style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f).padding(start = 4.dp))
+                            IconButton(onClick = { pickPictures.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                                Icon(painterResource(R.drawable.ic_add_photo), contentDescription = "Add pictures")
+                            }
                             TextButton(onClick = { preview = !preview }) { Text(if (preview) "Edit" else "Preview") }
                         }
                         if (preview) {
@@ -525,20 +564,38 @@ private fun EditorContent(
                             }
                         } else {
                             OutlinedTextField(
-                                notes,
-                                { notes = it },
-                                placeholder = { Text("Markdown: **bold**, *italic*, - lists, # headings, [[another entry]]") },
-                                modifier = Modifier.fillMaxWidth().onFocusChanged { notesFocused = it.isFocused },
+                                state = notes,
+                                placeholder = { Text("Markdown: **bold**, *italic*, - lists, # headings, [[another entry]]. Paste or add pictures too.") },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onFocusChanged { notesFocused = it.isFocused }
+                                    // Pictures pasted, or sent from the keyboard (a screenshot from its clipboard).
+                                    .contentReceiver { content ->
+                                        if (!content.hasMediaType(MediaType.Image)) return@contentReceiver content
+                                        val inputs = mutableListOf<InputStream>()
+                                        // Opened at once, while the app that sent them still lets us read them.
+                                        val rest = content.consume { item ->
+                                            val input = item.uri?.let { runCatching { resolver.openInputStream(it) }.getOrNull() }
+                                            input?.let(inputs::add) != null
+                                        }
+                                        addPictures(inputs)
+                                        rest
+                                    },
                             )
                         }
                     }
                 }
                 EditorBar(
                     writing = notesFocused && !preview,
-                    notes = notes,
+                    notes = TextFieldValue(body, notes.selection),
                     linkable = linkable,
                     word = word,
-                    onNotes = { notes = it },
+                    onNotes = { edited ->
+                        notes.edit {
+                            replace(0, length, edited.text)
+                            selection = edited.selection
+                        }
+                    },
                     onLookUp = {
                         lookingUpOpen = true
                         if (found == null) lookUp()
@@ -590,7 +647,7 @@ private fun EditorContent(
             onPick = { definition ->
                 val line = Wiktionary.markdown(definition)
                 val text = if (body.isBlank()) line else body.trimEnd() + "\n" + line
-                notes = TextFieldValue(text, TextRange(text.length))
+                notes.setTextAndPlaceCursorAtEnd(text)
             },
             onDismiss = { lookingUpOpen = false },
         )

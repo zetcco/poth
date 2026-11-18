@@ -73,6 +73,12 @@ fun MarkdownText(source: String, onEntryLink: (String) -> Unit, modifier: Modifi
                     BlockText(text, links, style = type.bodyLarge, color = colors.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp))
                 }
                 Markdown.Kind.RULE -> HorizontalDivider()
+                Markdown.Kind.IMAGE -> if (block.target.startsWith("img:")) {
+                    NoteImage(block.target.removePrefix("img:"), block.text)
+                } else {
+                    // Only pictures kept with the notes are shown; one elsewhere is named.
+                    Text("Picture: ${block.text.ifEmpty { block.target }}", style = type.bodyMedium, color = colors.onSurfaceVariant)
+                }
             }
         }
     }

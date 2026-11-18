@@ -7,6 +7,7 @@ import dev.indrajith.poth.data.BookFiles
 import dev.indrajith.poth.data.BookImporter
 import dev.indrajith.poth.data.Covers
 import dev.indrajith.poth.data.Dictionary
+import dev.indrajith.poth.data.NoteImages
 import dev.indrajith.poth.data.PageCounts
 import dev.indrajith.poth.data.Books
 import dev.indrajith.poth.data.PothDatabase
@@ -37,6 +38,7 @@ class Graph(
     val quickActions: QuickActions,
     val shelves: Shelves,
     val covers: Covers,
+    val images: NoteImages,
 ) {
     /** Reading as the rules count it, from page views since [since]. Call off the main thread. */
     fun readingSummary(zone: ZoneId, since: Long = 0): ReadingSummary =
@@ -72,7 +74,10 @@ class PothApp : Application(), GraphOwner {
             quickActions = QuickActions(this),
             shelves = Shelves(db),
             covers = Covers(File(filesDir, "covers")),
+            images = NoteImages(File(filesDir, "images")),
         )
         scope.launch(Dispatchers.IO) { books.load() }
+        // Pictures no note names any more, as entries were deleted or changed, go.
+        scope.launch(Dispatchers.IO) { graph.images.sweep(graph.dictionary.allNotes().flatMap(NoteImages::named).toSet()) }
     }
 }

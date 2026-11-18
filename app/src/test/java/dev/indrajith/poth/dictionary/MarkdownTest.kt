@@ -9,6 +9,19 @@ import org.junit.Test
 
 class MarkdownTest {
     @Test
+    fun picturesAreBlocksOfTheirOwn() {
+        assertEquals(
+            listOf(
+                Block(Kind.PARAGRAPH, "Seen on the ship:"),
+                Block(Kind.IMAGE, "", target = "img:3f9a.png"),
+                Block(Kind.IMAGE, "Tozbek's map", target = "img:77b0.jpg"),
+                Block(Kind.PARAGRAPH, "and more."),
+            ),
+            Markdown.parse("Seen on the ship:\n![](img:3f9a.png)\n![Tozbek's map](img:77b0.jpg) and more."),
+        )
+    }
+
+    @Test
     fun blocks() {
         val blocks = Markdown.parse(
             """

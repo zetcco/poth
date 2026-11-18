@@ -3,25 +3,36 @@ package dev.indrajith.poth.dictionary
 /**
  * The Markdown that dictionary entries are written in, read into blocks of text with styled
  * ranges. A small subset, enough for notes: headings, paragraphs, lists, quotes, rules, and
- * **bold**, *italic*, `code`, [links](url) and [[links to other entries]]. Single line breaks
- * are kept, as note apps do.
+ * **bold**, *italic*, `code`, [links](url) and [[links to other entries]], and pictures,
+ * ![](img:name), each a block of its own. Single line breaks are kept, as note apps do.
  */
 object Markdown {
-    enum class Kind { PARAGRAPH, HEADING, BULLET, NUMBERED, QUOTE, RULE }
+    enum class Kind { PARAGRAPH, HEADING, BULLET, NUMBERED, QUOTE, RULE, IMAGE }
 
     enum class Style { BOLD, ITALIC, CODE, LINK, ENTRY }
 
     /** [style] from [start] until [end]; [target] is a link's address or the entry it names. */
     data class Span(val start: Int, val end: Int, val style: Style, val target: String? = null)
 
-    /** [level] is a heading's level or a list item's indent; [marker] is a numbered item's "3.". */
-    data class Block(val kind: Kind, val text: String, val spans: List<Span> = emptyList(), val level: Int = 0, val marker: String = "")
+    /**
+     * [level] is a heading's level or a list item's indent; [marker] is a numbered item's "3.".
+     * A picture's [text] is its description and [target] where it is.
+     */
+    data class Block(
+        val kind: Kind,
+        val text: String,
+        val spans: List<Span> = emptyList(),
+        val level: Int = 0,
+        val marker: String = "",
+        val target: String = "",
+    )
 
     private val heading = Regex("^(#{1,6})\\s+(.*)$")
     private val rule = Regex("^(-{3,}|\\*{3,}|_{3,})$")
     private val bullet = Regex("^(\\s*)[-*+]\\s+(.*)$")
     private val numbered = Regex("^(\\s*)(\\d+)[.)]\\s+(.*)$")
     private val quote = Regex("^>\\s?(.*)$")
+    private val image = Regex("!\\[([^\\]]*)]\\(([^)\\s]+)\\)")
 
     fun parse(source: String): List<Block> {
         val blocks = mutableListOf<Block>()
@@ -31,13 +42,20 @@ object Markdown {
             paragraph.clear()
         }
         var quoteSource: String? = null // the Markdown of the quote being read, while lines continue it
-        for (raw in source.replace("\r\n", "\n").split('\n')) {
+        // A picture is a block of its own, even written inside a line.
+        val lines = source.replace("\r\n", "\n").replace(image) { "\n" + it.value + "\n" }.split('\n')
+        for (raw in lines) {
             val line = raw.trimEnd()
             val trimmed = line.trimStart()
             val continuing = quoteSource
             quoteSource = null
             when {
                 trimmed.isEmpty() -> flush()
+                image.matches(trimmed) -> {
+                    flush()
+                    val match = image.find(trimmed)!!
+                    blocks += Block(Kind.IMAGE, match.groupValues[1].trim(), target = match.groupValues[2])
+                }
                 heading.matches(trimmed) -> {
                     flush()
                     val match = heading.find(trimmed)!!

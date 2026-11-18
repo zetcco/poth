@@ -100,6 +100,12 @@ class Dictionary(private val db: PothDatabase, private val now: () -> Long = Sys
         }
     }
 
+    /** Every note written, now and before (for the pictures they name). */
+    fun allNotes(): List<String> = db.readableDatabase.rawQuery(
+        "SELECT body FROM entries UNION ALL SELECT body FROM entry_revisions",
+        null,
+    ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getString(0)) } }
+
     fun delete(id: Long) {
         db.writableDatabase.execSQL("DELETE FROM entries WHERE id = ?", arrayOf<Any?>(id))
         _changes.value++
