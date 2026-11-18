@@ -19,6 +19,15 @@ class WordsTest {
     }
 
     @Test
+    fun countsWordsByTheirKey() {
+        val counts = Words.count(sequenceOf("Liss lounged; Liss’s guard lounged.", "LOUNGING"))
+        assertEquals(2, counts["liss"])
+        assertEquals(2, counts["lounged"])
+        assertEquals(1, counts["lounging"])
+        assertNull(counts["lounges"])
+    }
+
+    @Test
     fun wordAtAnOffset() {
         val text = "the Parshendi drummers."
         assertEquals("parshendi", Words.at(text, 6)?.key)

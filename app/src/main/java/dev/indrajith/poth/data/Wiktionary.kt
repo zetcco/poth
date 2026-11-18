@@ -10,11 +10,17 @@ import org.json.JSONException
 import org.json.JSONObject
 import org.jsoup.Jsoup
 
-/** One sense of a word, as Wiktionary gives it. */
-data class Definition(val partOfSpeech: String, val text: String)
+/** One sense of a word, as Wiktionary gives it; [formOf] is the word it is a form of ("plural of brute"). */
+data class Definition(val partOfSpeech: String, val text: String, val formOf: String? = null)
 
 sealed interface Lookup {
-    data class Found(val definitions: List<Definition>) : Lookup
+    data class Found(val definitions: List<Definition>) : Lookup {
+        /** In Wiktionary's order, the commonest first. */
+        val partsOfSpeech get() = definitions.map { it.partOfSpeech }.distinct()
+
+        /** The word this one is a form of, if that is what it mainly is ("lounged": lounge). */
+        val formOf get() = definitions.firstOrNull()?.formOf
+    }
     data object NotFound : Lookup
     data class Failed(val reason: String) : Lookup
 }
@@ -32,6 +38,10 @@ object Wiktionary {
         val first = fetch(word.trim(), language)
         if (first == Lookup.NotFound && word.any(Char::isUpperCase)) fetch(word.trim().lowercase(), language) else first
     }
+
+    /** Whether Wiktionary has [form] as a form of [word] (lounged of lounge; not seed of see). */
+    suspend fun isFormOf(form: String, word: String, language: String): Boolean =
+        (define(form, language) as? Lookup.Found)?.definitions.orEmpty().any { it.formOf.equals(word, ignoreCase = true) }
 
     private fun fetch(word: String, language: String): Lookup {
         if (word.isEmpty()) return Lookup.NotFound
@@ -68,9 +78,11 @@ object Wiktionary {
                 var taken = 0
                 for (j in 0 until senses.length()) {
                     if (taken == PER_PART_OF_SPEECH) break
-                    val text = Jsoup.parse(senses.getJSONObject(j).optString("definition")).text().trim()
+                    val html = Jsoup.parse(senses.getJSONObject(j).optString("definition"))
+                    val text = html.text().trim()
                     if (text.isEmpty()) continue
-                    add(Definition(partOfSpeech, text))
+                    val formOf = html.selectFirst(".form-of-definition-link")?.text()?.trim()?.takeIf { it.isNotEmpty() }
+                    add(Definition(partOfSpeech, text, formOf))
                     taken++
                 }
             }

@@ -29,6 +29,13 @@ object Words {
         return tokens
     }
 
+    /** How many times each word is in [texts], by its [key]. */
+    fun count(texts: Sequence<CharSequence>): Map<String, Int> {
+        val counts = HashMap<String, Int>()
+        for (text in texts) for (token in tokens(text)) counts.merge(token.key, 1, Int::plus)
+        return counts
+    }
+
     /** Text as a term is written: without soft hyphens or word joiners, its spaces single. */
     fun clean(text: String): String = text.replace("\u00AD", "").replace("\u2060", "").replace(Regex("\\s+"), " ").trim()
 

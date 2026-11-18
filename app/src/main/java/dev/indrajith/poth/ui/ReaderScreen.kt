@@ -97,6 +97,7 @@ import dev.indrajith.poth.dictionary.EntryMarker
 import dev.indrajith.poth.dictionary.Words
 import dev.indrajith.poth.epub.EpubBook
 import dev.indrajith.poth.epub.EpubException
+import dev.indrajith.poth.epub.TextBlock
 import dev.indrajith.poth.reader.Arrival
 import dev.indrajith.poth.reader.Highlight
 import dev.indrajith.poth.reader.Marker
@@ -115,6 +116,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import dev.indrajith.poth.reader.Page as BookPage
@@ -215,6 +217,18 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
     val marker = remember(entries) { EntryMarker(entries) }
     val trail = remember { CardTrail() }
     var editing by remember { mutableStateOf<Entry?>(null) }
+    // How often the book uses each word, for the forms the editor offers: counted the first time it opens.
+    var wordCounts by remember(book) { mutableStateOf<Map<String, Int>?>(null) }
+    LaunchedEffect(editing != null) {
+        if (editing == null || wordCounts != null) return@LaunchedEffect
+        wordCounts = withContext(Dispatchers.Default) {
+            val texts = book.readingOrder.asSequence()
+                .flatMap { spine -> ensureActive().let { book.chapter(spine).blocks.asSequence() } }
+                .filterIsInstance<TextBlock>()
+                .map { it.text }
+            Words.count(texts)
+        }
+    }
     val haptics = LocalHapticFeedback.current
 
     // Quick actions hand the word (and the sentence it was read in) to other apps.
@@ -522,6 +536,8 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
             },
             onClose = { editing = null },
             linkable = entries,
+            bookTitle = book.title.replace(Regex("""\s*\([^)]*\)$"""), "").ifEmpty { book.title },
+            wordCounts = wordCounts,
         )
         QuickActionsPanel(open = configuringActions, store = quickActions, onClose = { configuringActions = false })
         if (confirmingTracking) {
