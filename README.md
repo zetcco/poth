@@ -1,5 +1,10 @@
 # Poth
 
+![Android 13+](https://img.shields.io/badge/Android-13%2B-3DDC84?logo=android&logoColor=white)
+![Kotlin 2.4](https://img.shields.io/badge/Kotlin-2.4-7F52FF?logo=kotlin&logoColor=white)
+![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203%20Expressive-4285F4?logo=jetpackcompose&logoColor=white)
+![EPUB 2 and 3](https://img.shields.io/badge/EPUB-2%20%26%203-E86A33)
+
 A personal EPUB reader for Android (Kotlin, Jetpack Compose, Material 3 Expressive), for
 Android 13 and later.
 
