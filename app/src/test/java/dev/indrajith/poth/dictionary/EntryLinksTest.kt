@@ -8,6 +8,22 @@ import org.junit.Test
 
 class EntryLinksTest {
     @Test
+    fun backlinksAreLinksFollowedBackwards() {
+        val henry = Entry(1, "Sir Henry Baskerville", aliases = listOf("Sir Henry"), body = "Heir to the Hall.", scope = Scope.BOOK)
+        val mortimer = Entry(2, "Mortimer", body = "Looks after [[Sir Henry]], and [[Mortimer]] again.", scope = Scope.BOOK)
+        val holmes = Entry(3, "Holmes", body = "Sends Watson with [[Sir Henry Baskerville|him]]; knows [[Mortimer]].", scope = Scope.BOOK)
+        val watson = Entry(4, "Watson", body = "Writes to [[Holmes]] about [[Lestrade]].", scope = Scope.BOOK)
+        val backlinks = EntryLinks.backlinks(listOf(henry, mortimer, holmes, watson))
+        assertEquals(listOf(mortimer, holmes), backlinks[1L])
+        assertEquals(listOf(holmes), backlinks[2L]) // not itself
+        assertEquals(listOf(watson), backlinks[3L])
+        assertNull(backlinks[4L])
+        // Linked both ways, each one's own notes already show the other.
+        val linkedBack = holmes.copy(body = "Knows [[Watson]].")
+        assertNull(EntryLinks.backlinks(listOf(linkedBack, watson))[3L])
+    }
+
+    @Test
     fun aLinkIsOpenUntilItIsClosed() {
         assertEquals(EntryLinks.Open(6, "Par"), EntryLinks.open("see [[Par", 9))
         assertEquals(EntryLinks.Open(2, ""), EntryLinks.open("[[", 2))

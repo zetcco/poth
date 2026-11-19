@@ -7,6 +7,28 @@ import dev.indrajith.poth.data.Entry
  * entries for it, and finishing it.
  */
 object EntryLinks {
+    /**
+     * For each entry, the others among [entries] whose notes link to it, in [entries]' order:
+     * links followed backwards. Not one it links to itself, which its own notes already show.
+     */
+    fun backlinks(entries: List<Entry>): Map<Long, List<Entry>> {
+        val matcher = Matcher(entries.flatMap { entry -> entry.terms.map { it to entry.id } })
+        val linksTo = entries.associate { entry ->
+            entry.id to targets(entry.body).flatMap(matcher::lookup).filter { it != entry.id }.toSet()
+        }
+        val backlinks = HashMap<Long, MutableList<Entry>>()
+        for (from in entries) {
+            for (to in linksTo[from.id].orEmpty()) {
+                if (from.id !in linksTo[to].orEmpty()) backlinks.getOrPut(to) { mutableListOf() } += from
+            }
+        }
+        return backlinks
+    }
+
+    /** The entries [notes] link to, as written. */
+    private fun targets(notes: String): List<String> =
+        Markdown.parse(notes).flatMap { block -> block.spans.filter { it.style == Markdown.Style.ENTRY }.mapNotNull { it.target } }
+
     /** A link being typed: "[[" ends at [start], and [query] is what has been typed after it. */
     data class Open(val start: Int, val query: String)
 

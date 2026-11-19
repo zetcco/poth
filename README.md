@@ -8,28 +8,11 @@
 A personal EPUB reader for Android (Kotlin, Jetpack Compose, Material 3 Expressive), for
 Android 13 and later.
 
-<table>
-  <tr>
-    <td><img src="docs/screenshots/reader.png" width="240" alt="A page with the dictionary's words underlined"></td>
-    <td><img src="docs/screenshots/entry-card.png" width="240" alt="An entry's notes on a card over the page"></td>
-    <td><img src="docs/screenshots/word-menu.png" width="240" alt="A held word with its menu"></td>
-  </tr>
-  <tr>
-    <td>Words with entries are underlined; general words more faintly</td>
-    <td>An entry's notes, with a link to another entry</td>
-    <td>Hold a word to add it, copy it or look it up</td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/word-forms.png" width="240" alt="The entry editor offering a word's forms"></td>
-    <td><img src="docs/screenshots/look-up.png" width="240" alt="Quick actions and Wiktionary definitions in a sheet"></td>
-    <td><img src="docs/screenshots/stats.png" width="240" alt="Reading stats and a calendar of reading days"></td>
-  </tr>
-  <tr>
-    <td>A word's forms, each checked against Wiktionary</td>
-    <td>Quick actions and Wiktionary definitions</td>
-    <td>Reading stats and reading days</td>
-  </tr>
-</table>
+| ![A page with the dictionary's words underlined](docs/screenshots/reader.png) | ![An entry's notes on a card over the page](docs/screenshots/entry-card.png) | ![A held word with its menu](docs/screenshots/word-menu.png) |
+| :-: | :-: | :-: |
+| Words with entries are underlined; general words more faintly | An entry's notes, with a link to another entry | Hold a word to add it, copy it or look it up |
+| ![The entry editor offering a word's forms](docs/screenshots/word-forms.png) | ![Quick actions and Wiktionary definitions in a sheet](docs/screenshots/look-up.png) | ![Reading stats and a calendar of reading days](docs/screenshots/stats.png) |
+| A word's forms, each checked against Wiktionary | Quick actions and Wiktionary definitions | Reading stats and reading days |
 
 The pages shown are from *The Hound of the Baskervilles* (public domain), as published by
 [Standard Ebooks](https://standardebooks.org).
@@ -44,7 +27,8 @@ The pages shown are from *The Hound of the Baskervilles* (public domain), as pub
 - Alternate spellings and names also match, possessives (Kholin's) match on their own, and the
   word's forms (plurals, -ed, -ing) are suggested, with counts from the book. General words can
   add every form at once; each form is checked against Wiktionary before it's offered.
-- `[[Links]]` between entries, suggested as you type and followed from the entry card.
+- `[[Links]]` between entries, suggested as you type and followed from the entry card. An entry
+  also lists the entries that link to it.
 - Quick actions send a word, or a prompt made from it, to other apps (search, translation,
   AI assistants).
 - Wiktionary definitions, added to the notes with a tap. Only the word is sent.

@@ -1,10 +1,12 @@
 package dev.indrajith.poth.ui
 
 import android.widget.Toast
+import androidx.annotation.DrawableRes
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -15,13 +17,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -40,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.indrajith.poth.Graph
 import dev.indrajith.poth.R
+import dev.indrajith.poth.data.Book
 import dev.indrajith.poth.data.Entry
 import dev.indrajith.poth.data.Scope
 import dev.indrajith.poth.data.Shelf
@@ -62,7 +73,8 @@ private class Group(val place: String, val entries: List<Entry>)
 /**
  * The whole dictionary: every entry, by where it shows (the library, then each shelf, then
  * each book), and a search through words and notes. Tapping an entry shows its card; links in
- * it lead on to other entries, and it can be edited from there.
+ * it lead on to other entries, and it can be edited from there. A new entry can be written here
+ * too, for the library, a shelf or a book: the word searched for, if nothing matched it.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalFoundationApi::class)
 @Composable
@@ -77,7 +89,10 @@ fun DictionaryScreen(graph: Graph, onBack: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     val trail = remember { CardTrail() }
     var editing by remember { mutableStateOf<Entry?>(null) }
+    var choosingPlace by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    // The keyboard goes before a card or the editor comes up, which it would cover.
+    val focus = LocalFocusManager.current
 
     fun place(entry: Entry): String = when (entry.scope) {
         Scope.LIBRARY -> "Library"
@@ -99,6 +114,18 @@ fun DictionaryScreen(graph: Graph, onBack: () -> Unit) {
 
     Box(Modifier.fillMaxSize()) {
         Scaffold(
+            floatingActionButton = {
+                if (loaded != null) {
+                    ExtendedFloatingActionButton(
+                        onClick = {
+                            focus.clearFocus()
+                            choosingPlace = true
+                        },
+                        icon = { Icon(painterResource(R.drawable.ic_add), contentDescription = null) },
+                        text = { Text("New entry") },
+                    )
+                }
+            },
             topBar = {
                 // One solid bar for the title and the search, tinted once the list is scrolled.
                 Column(Modifier.background(barColor)) {
@@ -129,7 +156,14 @@ fun DictionaryScreen(graph: Graph, onBack: () -> Unit) {
             when {
                 loaded == null -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { LoadingIndicator() }
                 entries.isEmpty() -> Message("No entries yet. Hold a word while reading to write about it.", Modifier.padding(padding))
-                groups.isEmpty() -> Message("Nothing matches “${query.trim()}”.", Modifier.padding(padding))
+                groups.isEmpty() -> Message("Nothing matches “${query.trim()}”.", Modifier.padding(padding)) {
+                    Button(
+                        onClick = {
+                            focus.clearFocus()
+                            choosingPlace = true
+                        },
+                    ) { Text("Add “${query.trim()}”") }
+                }
                 // The list stops under the bar rather than scrolling behind it, so the headers stick below it.
                 else -> LazyColumn(
                     state = list,
@@ -138,7 +172,12 @@ fun DictionaryScreen(graph: Graph, onBack: () -> Unit) {
                 ) {
                     for (group in groups) {
                         stickyHeader(key = "place:${group.place}") { PlaceHeader(group.place, group.entries.size) }
-                        items(group.entries, key = { it.id }) { entry -> EntryRow(entry) { trail.open(listOf(entry.id)) } }
+                        items(group.entries, key = { it.id }) { entry ->
+                            EntryRow(entry) {
+                                focus.clearFocus()
+                                trail.open(listOf(entry.id))
+                            }
+                        }
                     }
                 }
             }
@@ -166,6 +205,18 @@ fun DictionaryScreen(graph: Graph, onBack: () -> Unit) {
                 }
             },
         )
+        if (choosingPlace) {
+            NewEntrySheet(
+                word = query.trim(),
+                shelves = shelves,
+                books = books,
+                onPick = { scope, scopeId ->
+                    choosingPlace = false
+                    editing = Entry(headword = query.trim(), scope = scope, scopeId = scopeId)
+                },
+                onDismiss = { choosingPlace = false },
+            )
+        }
         // Kept while the editor slides away, so it doesn't change on the way out.
         var editingPlace by remember { mutableStateOf("") }
         val shownEditing = editing
@@ -229,8 +280,46 @@ private fun EntryRow(entry: Entry, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Message(text: String, modifier: Modifier) {
-    Box(modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+private fun Message(text: String, modifier: Modifier, action: (@Composable () -> Unit)? = null) {
+    Column(
+        modifier.fillMaxSize().padding(32.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Text(text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+        action?.invoke()
     }
+}
+
+/** Where a new entry ([word], if one was searched for) will show: the library, a shelf, or one book. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NewEntrySheet(word: String, shelves: List<Shelf>, books: List<Book>, onPick: (Scope, String?) -> Unit, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
+            Text(
+                if (word.isEmpty()) "New entry, for" else "“$word”, for",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+            )
+            PlaceOption(R.drawable.ic_library, "Library", "Every book: for general words") { onPick(Scope.LIBRARY, null) }
+            for (shelf in shelves) {
+                PlaceOption(R.drawable.ic_shelf, shelf.name, "Every book on the shelf") { onPick(Scope.SHELF, shelf.id.toString()) }
+            }
+            for (book in books) {
+                PlaceOption(R.drawable.ic_book, book.title, "Only this book") { onPick(Scope.BOOK, book.id) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaceOption(@DrawableRes icon: Int, name: String, meaning: String, onClick: () -> Unit) {
+    ListItem(
+        headlineContent = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        supportingContent = { Text(meaning) },
+        leadingContent = { Icon(painterResource(icon), contentDescription = null) },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        modifier = Modifier.clickable(onClick = onClick),
+    )
 }

@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -197,6 +198,7 @@ fun EntryCard(
 ) {
     val current = entries.filter { it.id in trail.ids }
     val open = current.isNotEmpty()
+    val linkedFrom = remember(entries) { EntryLinks.backlinks(entries) }
     val previous = trail.previous?.let { ids -> entries.firstOrNull { it.id in ids }?.headword }
     // Kept while the card slides away, so it does not empty out on the way.
     var shown by remember { mutableStateOf(CardPage(current, trail.steps.size, previous)) }
@@ -250,7 +252,14 @@ fun EntryCard(
                             if (page.previous != null) BackToEntry(page.previous) { trail.back() }
                             page.entries.forEachIndexed { index, entry ->
                                 if (index > 0) HorizontalDivider(Modifier.padding(end = 12.dp))
-                                EntryView(entry, scopeLabel(entry), onEdit = { onEdit(entry) }, onEntryLink = onEntryLink)
+                                EntryView(
+                                    entry,
+                                    scopeLabel(entry),
+                                    linkedFrom = linkedFrom[entry.id].orEmpty(),
+                                    onEdit = { onEdit(entry) },
+                                    onEntryLink = onEntryLink,
+                                    onOpen = { trail.follow(listOf(it.id)) },
+                                )
                             }
                         }
                     }
@@ -293,8 +302,17 @@ private fun BackToEntry(headword: String, onClick: () -> Unit) {
     }
 }
 
+/** An entry on the card: its word, where it shows, its notes, and the entries [linkedFrom] it, to [onOpen]. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun EntryView(entry: Entry, scope: String, onEdit: () -> Unit, onEntryLink: (String) -> Unit) {
+private fun EntryView(
+    entry: Entry,
+    scope: String,
+    linkedFrom: List<Entry>,
+    onEdit: () -> Unit,
+    onEntryLink: (String) -> Unit,
+    onOpen: (Entry) -> Unit,
+) {
     val colors = MaterialTheme.colorScheme
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -310,6 +328,19 @@ private fun EntryView(entry: Entry, scope: String, onEdit: () -> Unit, onEntryLi
                 Text("No notes yet.", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
             } else {
                 MarkdownText(entry.body, onEntryLink)
+            }
+        }
+        if (linkedFrom.isNotEmpty()) {
+            FlowRow(Modifier.padding(end = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Linked from",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = colors.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.CenterVertically),
+                )
+                for (from in linkedFrom) {
+                    SuggestionChip(onClick = { onOpen(from) }, label = { Text(from.headword, maxLines = 1, overflow = TextOverflow.Ellipsis) })
+                }
             }
         }
     }
