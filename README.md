@@ -5,19 +5,6 @@ Android 13 and later.
 
 ## Features
 
-### Reading
-
-- Its own page renderer: the book's styling (sizes, margins, indents, small caps), justified
-  text and pictures, laid out in pages without a web view.
-- Swipe to turn: the page slides away to show the next one beneath it. A swipe in from the edge
-  goes back, and a swipe up or down does nothing.
-- Pinch to zoom in on a page without reflowing it; double-tap to zoom out.
-- Reader bars with the title, chapter, page number ("18 of 1789"), a scrubber marked with the
-  book's parts, a table of contents, and a rotation lock.
-- Your place is a chapter and a character in it, so it survives font and screen changes.
-- The screen stays on for 10 minutes after the last touch.
-- Hold a picture in the book to copy or share it.
-
 ### Personal dictionary
 
 - Write entries for names and words as you read, in Markdown. Every place an entry's word
@@ -27,17 +14,12 @@ Android 13 and later.
   word's forms (plurals, -ed, -ing) are suggested, with counts from the book. General words can
   add every form at once; each form is checked against Wiktionary before it's offered.
 - `[[Links]]` between entries, suggested as you type and followed from the entry card.
-- Paste or add pictures in the notes; tap one to see it full screen.
-- Hold a word, or drag across several, to add an entry for them, copy them, or look them up.
 - Quick actions send a word, or a prompt made from it, to other apps (search, translation,
   AI assistants).
 - Wiktionary definitions, added to the notes with a tap. Only the word is sent.
-- A dictionary screen lists every entry by book, shelf and library, with search.
 
-### Library and reading stats
+### Reading stats
 
-- Books with covers, grouped by shelf, with each book's progress.
-- Time read today, your streak and recent days at the top of the library.
 - Stats count only real reading: quick glances and pages left open don't count, and rules apply
   when the stats are shown, so changing a rule changes every past day too.
 - Reading speed measured from pages read straight through, and measured again on request.
