@@ -115,7 +115,7 @@ import dev.indrajith.poth.reader.Section
 import dev.indrajith.poth.reader.Swipe
 import dev.indrajith.poth.reader.WordRange
 import dev.indrajith.poth.reader.Zoom
-import dev.indrajith.poth.widget.ReadingWidget
+import dev.indrajith.poth.widget.Widgets
 import java.io.File
 import java.io.IOException
 import kotlin.math.max
@@ -193,11 +193,11 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
         clock.resume()
     }
     var confirmingTracking by remember { mutableStateOf(false) }
-    // When reading stops, the widget catches up (once the last page view is written).
+    // When reading stops, the widgets catch up (once the last page view is written).
     val appContext = LocalContext.current.applicationContext
     fun refreshWidget() = graph.scope.launch {
         delay(1_000)
-        ReadingWidget.updateAll(appContext)
+        Widgets.updateAll(appContext)
     }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
         clock.pause()

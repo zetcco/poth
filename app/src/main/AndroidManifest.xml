@@ -57,6 +57,19 @@
                 android:resource="@xml/reading_widget_info" />
         </receiver>
 
+        <!-- The home-screen widget: today's minutes and the last 7 days, two cells by one. -->
+        <receiver
+            android:name=".widget.TodayWidgetReceiver"
+            android:exported="true"
+            android:label="@string/today_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/today_widget_info" />
+        </receiver>
+
         <!-- Pictures from books, copied or shared, for other apps (and poth's notes) to read. -->
         <provider
             android:name="androidx.core.content.FileProvider"
