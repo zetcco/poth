@@ -86,6 +86,10 @@ class OpenBook(private val epub: EpubBook) : Closeable {
         return DecodedImage(bitmap, size.width, size.height)
     }
 
+    /** An image's file, as it is in the book. */
+    @Synchronized
+    fun imageFile(path: String): ByteArray? = imageBytes(path)
+
     /** Only an image's size, which is all that counting pages needs. */
     @Synchronized
     fun imageSize(path: String): DecodedImage? = imageBytes(path)?.let(::size)

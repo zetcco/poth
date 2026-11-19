@@ -119,6 +119,10 @@ class Page(
      */
     fun wordNear(x: Float, y: Float): WordRange? = slices.minByOrNull { it.distanceTo(y) }?.wordNear(x, y)
 
+    /** The picture at [x], [y] on the page, or null if there is none there. */
+    fun imageAt(x: Float, y: Float): PageImage? =
+        items.firstNotNullOfOrNull { item -> (item as? ImageItem)?.takeIf { it.rect.contains(x, y) }?.let { PageImage(it.path, RectF(it.rect)) } }
+
     /** The word that chapter offset [offset] is in, if it is on this page. */
     fun wordAround(offset: Int): WordRange? = slices.firstNotNullOfOrNull { it.wordAround(offset) }
 
@@ -140,6 +144,9 @@ class Page(
     /** The page's text, a paragraph (or part of one) a line. */
     fun text(): String = items.filterIsInstance<TextSlice>().joinToString("\n") { it.text() }
 }
+
+/** A picture on a page: its [path] in the book, and where on the page it is drawn. */
+class PageImage(val path: String, val rect: RectF)
 
 sealed interface PageItem {
     fun draw(canvas: Canvas, marker: Marker?, highlight: Highlight?)
@@ -371,7 +378,7 @@ private class TextSlice(
     }
 }
 
-private class ImageItem(val bitmap: Bitmap?, val rect: RectF) : PageItem {
+private class ImageItem(val path: String, val bitmap: Bitmap?, val rect: RectF) : PageItem {
     override fun draw(canvas: Canvas, marker: Marker?, highlight: Highlight?) {
         if (bitmap != null) canvas.drawBitmap(bitmap, null, rect, imagePaint)
     }
@@ -474,7 +481,7 @@ class Paginator(
         if (!sink.isEmpty && sink.y + gap() + height > spec.height) sink.breakPage(block.start)
         val top = sink.y + min(gap(), spec.height - height)
         val left = (spec.width - width) / 2 // images are centred
-        sink.add(ImageItem(decoded.bitmap, RectF(left, top, left + width, top + height)), top + height, 0)
+        sink.add(ImageItem(block.path, decoded.bitmap, RectF(left, top, left + width, top + height)), top + height, 0)
     }
 
     private fun placeRule(block: RuleBlock, sink: Sink, gap: () -> Float) {

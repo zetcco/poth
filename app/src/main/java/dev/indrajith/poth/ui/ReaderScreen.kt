@@ -2,8 +2,11 @@ package dev.indrajith.poth.ui
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Paint
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
@@ -77,6 +80,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.toSize
+import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -103,6 +107,7 @@ import dev.indrajith.poth.reader.Highlight
 import dev.indrajith.poth.reader.Marker
 import dev.indrajith.poth.reader.OpenBook
 import dev.indrajith.poth.reader.PageClock
+import dev.indrajith.poth.reader.PageImage
 import dev.indrajith.poth.reader.PageMap
 import dev.indrajith.poth.reader.PageSpec
 import dev.indrajith.poth.reader.Pages
@@ -111,6 +116,7 @@ import dev.indrajith.poth.reader.Swipe
 import dev.indrajith.poth.reader.WordRange
 import dev.indrajith.poth.reader.Zoom
 import dev.indrajith.poth.widget.ReadingWidget
+import java.io.File
 import java.io.IOException
 import kotlin.math.max
 import kotlin.math.min
@@ -405,6 +411,37 @@ private fun Reader(graph: Graph, bookId: String, book: OpenBook, start: Position
                 },
             )
         }
+        // A picture held: copy or share it.
+        val held = turner.heldImage
+        if (held != null && turner.offset.value == 0f) {
+            val zoom = turner.zoom
+            val origin = Offset(left.toFloat(), top.toFloat())
+            ImageMenu(
+                anchor = Rect(
+                    zoom.toScreen(Offset(held.rect.left, held.rect.top), origin),
+                    zoom.toScreen(Offset(held.rect.right, held.rect.bottom), origin),
+                ),
+                onCopy = {
+                    turner.heldImage = null
+                    scope.launch {
+                        val uri = withContext(Dispatchers.IO) { shareable(context, book, held.path) } ?: return@launch
+                        context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newUri(context.contentResolver, book.title, uri))
+                    }
+                },
+                onShare = {
+                    turner.heldImage = null
+                    scope.launch {
+                        val uri = withContext(Dispatchers.IO) { shareable(context, book, held.path) } ?: return@launch
+                        val send = Intent(Intent.ACTION_SEND)
+                            .setType(context.contentResolver.getType(uri) ?: "image/*")
+                            .putExtra(Intent.EXTRA_STREAM, uri)
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        send.clipData = ClipData.newRawUri(null, uri)
+                        context.startActivity(Intent.createChooser(send, null))
+                    }
+                },
+            )
+        }
         // Highlighted words: write about them, look them up, or copy them.
         val selection = turner.selection
         val selected = remember(current, selection) { selection?.let { current?.passage(it.start, it.end) } }
@@ -582,11 +619,15 @@ private class Turner(val pages: Pages) {
     var selection by mutableStateOf<WordRange?>(null)
     var selecting by mutableStateOf(false)
 
+    /** A picture on the page shown, held for copying. */
+    var heldImage by mutableStateOf<PageImage?>(null)
+
     suspend fun show(page: BookPage, arrivedBy: String) {
         offset.snapTo(0f)
         zoom = Zoom()
         selection = null
         selecting = false
+        heldImage = null
         shown = Shown(page, arrivedBy)
     }
 
@@ -668,6 +709,7 @@ private fun PageTurner(
     }
     BackHandler(enabled = turner.zoom.zoomed) { scope.launch { turner.unzoom() } }
     BackHandler(enabled = turner.selection != null) { turner.selection = null }
+    BackHandler(enabled = turner.heldImage != null) { turner.heldImage = null }
     val origin = Offset(pageLeft, pageTop)
     val selection = turner.selection
     val passage = remember(shown.page, selection) { selection?.let { shown.page.passage(it.start, it.end) } }
@@ -692,6 +734,7 @@ private fun PageTurner(
     val coverFill = remember { Paint().apply { color = Page.background.toArgb() } }
     val coverDim = remember { Paint().apply { color = Page.background.toArgb() } }
     val coverEdge = remember { Paint().apply { color = Page.text.copy(alpha = 0.3f).toArgb() } }
+    val imageTint = remember(highlightColor) { Paint().apply { color = highlightColor } }
 
     /** Which handle is at [at] on the screen: the start's (true), the end's (false), or neither. */
     fun handleAt(at: Offset): Boolean? {
@@ -749,7 +792,10 @@ private fun PageTurner(
                 }
                 detectTapGestures(
                     onDoubleTap = if (turner.zoom.zoomed) { _ -> scope.launch { turner.unzoom() } } else null,
-                    onTap = { onPage(it, tap) },
+                    onTap = {
+                        // A tap lets go of a held picture, and does nothing more.
+                        if (turner.heldImage != null) turner.heldImage = null else onPage(it, tap)
+                    },
                 )
             }
             .pointerInput(turner) {
@@ -783,12 +829,18 @@ private fun PageTurner(
                         val at = turner.zoom.toPage(down.position, origin)
                         val hit = page.wordAt(at.x, at.y, currentMarker)
                         if (hit == null) {
-                            // No word here; and a long press is not a tap.
+                            // A picture here is held, to copy; and a long press is not a tap.
+                            page.imageAt(at.x, at.y)?.let { image ->
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                turner.selection = null
+                                turner.heldImage = image
+                            }
                             follow(down.id) {}
                             currentEvent.changes.forEach { it.consume() }
                             return@awaitEachGesture
                         }
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        turner.heldImage = null
                         val word = WordRange(hit.start, hit.end)
                         turner.selection = word
                         extend(page, down.id, word, grab = Offset.Zero)
@@ -796,6 +848,7 @@ private fun PageTurner(
                     }
                     val moved = slop ?: return@awaitEachGesture
                     turner.selection = null
+                    turner.heldImage = null
                     when {
                         // Up or down: not a page turn, and not a tap either.
                         !Swipe.sideways(moved.x, moved.y) -> follow(down.id) {}
@@ -916,6 +969,10 @@ private fun PageTurner(
                 }
                 else -> draw(page, dx, highlight)
             }
+            // A held picture is tinted as highlighted words are.
+            turner.heldImage?.takeIf { dx == 0f }?.let { image ->
+                native.drawRect(pageLeft + image.rect.left, pageTop + image.rect.top, pageLeft + image.rect.right, pageTop + image.rect.bottom, imageTint)
+            }
             native.restore()
         }
         val rects = passage?.rects
@@ -1023,4 +1080,16 @@ private fun RotationLock(locked: Boolean) {
         activity.requestedOrientation = if (locked) ActivityInfo.SCREEN_ORIENTATION_LOCKED else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         onDispose { activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
     }
+}
+
+/**
+ * The book's picture at [path], as a file other apps may read through poth's provider: to paste
+ * from the clipboard, or to share. Null if the book has no such picture.
+ */
+private fun shareable(context: Context, book: OpenBook, path: String): Uri? {
+    val bytes = book.imageFile(path) ?: return null
+    val dir = File(context.cacheDir, "shared").apply { mkdirs() }
+    val file = File(dir, path.substringAfterLast('/').ifEmpty { "picture" })
+    file.writeBytes(bytes)
+    return FileProvider.getUriForFile(context, "${context.packageName}.files", file)
 }
