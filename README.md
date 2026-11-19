@@ -8,6 +8,32 @@
 A personal EPUB reader for Android (Kotlin, Jetpack Compose, Material 3 Expressive), for
 Android 13 and later.
 
+<table>
+  <tr>
+    <td><img src="docs/screenshots/reader.png" width="240" alt="A page with the dictionary's words underlined"></td>
+    <td><img src="docs/screenshots/entry-card.png" width="240" alt="An entry's notes on a card over the page"></td>
+    <td><img src="docs/screenshots/word-menu.png" width="240" alt="A held word with its menu"></td>
+  </tr>
+  <tr>
+    <td>Words with entries are underlined; general words more faintly</td>
+    <td>An entry's notes, with a link to another entry</td>
+    <td>Hold a word to add it, copy it or look it up</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/word-forms.png" width="240" alt="The entry editor offering a word's forms"></td>
+    <td><img src="docs/screenshots/look-up.png" width="240" alt="Quick actions and Wiktionary definitions in a sheet"></td>
+    <td><img src="docs/screenshots/stats.png" width="240" alt="Reading stats and a calendar of reading days"></td>
+  </tr>
+  <tr>
+    <td>A word's forms, each checked against Wiktionary</td>
+    <td>Quick actions and Wiktionary definitions</td>
+    <td>Reading stats and reading days</td>
+  </tr>
+</table>
+
+The pages shown are from *The Hound of the Baskervilles* (public domain), as published by
+[Standard Ebooks](https://standardebooks.org).
+
 ## Features
 
 ### Personal dictionary
