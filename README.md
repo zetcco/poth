@@ -48,9 +48,14 @@ The pages shown are from *The Hound of the Baskervilles* (public domain), as pub
 ```sh
 export JAVA_HOME=~/.sdkman/candidates/java/current
 ./gradlew :app:testDebugUnitTest          # unit tests (plain JVM)
-./gradlew :app:installDebug               # build and install on the phone connected over adb
+./gradlew :app:installRelease             # build and install on the phone connected over adb
 adb shell am start -n dev.indrajith.poth/.MainActivity
 ```
+
+Read with the release build: a debug build is debuggable, so Android neither compiles it ahead
+nor lets Compose run at speed, and lists and page turns stutter. Both are signed with the debug
+key, so either installs over the other and keeps the books and the dictionary; install the debug
+build when you need `adb shell run-as`, then the release build again.
 
 ## Layout
 

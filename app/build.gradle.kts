@@ -16,9 +16,14 @@ android {
     }
 
     buildTypes {
+        // The build to read with: a debug build is debuggable, which keeps Android from
+        // compiling it ahead and Compose from running at speed; lists and page turns stutter.
         release {
-            isMinifyEnabled = false
-            // No release key yet: poth is installed from this machine over adb.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // No release key yet: poth is installed from this machine over adb, and signed with
+            // the debug key it installs over a debug build, keeping the books and dictionary.
             signingConfig = signingConfigs.getByName("debug")
         }
     }

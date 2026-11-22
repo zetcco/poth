@@ -71,6 +71,14 @@ import kotlinx.coroutines.withContext
 private class Group(val place: String, val entries: List<Entry>)
 
 /**
+ * Every entry, and the start of each one's notes for the list: read off the main thread, so a
+ * row scrolling in has nothing left to parse.
+ */
+private class Listing(val entries: List<Entry>) {
+    val previews: Map<Long, String> = entries.associate { it.id to Browse.preview(it.body) }
+}
+
+/**
  * The whole dictionary: every entry, by where it shows (the library, then each shelf, then
  * each book), and a search through words and notes. Tapping an entry shows its card; links in
  * it lead on to other entries, and it can be edited from there. A new entry can be written here
@@ -83,9 +91,10 @@ fun DictionaryScreen(graph: Graph, onBack: () -> Unit) {
     val changes by dictionary.changes.collectAsStateWithLifecycle()
     val shelfChanges by graph.shelves.changes.collectAsStateWithLifecycle()
     val books by graph.books.all.collectAsStateWithLifecycle()
-    val loaded by produceState<List<Entry>?>(null, changes) { value = withContext(Dispatchers.IO) { dictionary.all() } }
+    val loaded by produceState<Listing?>(null, changes) { value = withContext(Dispatchers.IO) { Listing(dictionary.all()) } }
     val shelves by produceState(emptyList<Shelf>(), shelfChanges) { value = withContext(Dispatchers.IO) { graph.shelves.all() } }
-    val entries = loaded.orEmpty()
+    val entries = loaded?.entries.orEmpty()
+    val previews = loaded?.previews.orEmpty()
     var query by rememberSaveable { mutableStateOf("") }
     val trail = remember { CardTrail() }
     var editing by remember { mutableStateOf<Entry?>(null) }
@@ -171,9 +180,9 @@ fun DictionaryScreen(graph: Graph, onBack: () -> Unit) {
                     modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
                 ) {
                     for (group in groups) {
-                        stickyHeader(key = "place:${group.place}") { PlaceHeader(group.place, group.entries.size) }
-                        items(group.entries, key = { it.id }) { entry ->
-                            EntryRow(entry) {
+                        stickyHeader(key = "place:${group.place}", contentType = "place") { PlaceHeader(group.place, group.entries.size) }
+                        items(group.entries, key = { it.id }, contentType = { "entry" }) { entry ->
+                            EntryRow(entry, previews[entry.id].orEmpty()) {
                                 focus.clearFocus()
                                 trail.open(listOf(entry.id))
                             }
@@ -259,9 +268,8 @@ private fun PlaceHeader(place: String, count: Int) {
 }
 
 @Composable
-private fun EntryRow(entry: Entry, onClick: () -> Unit) {
+private fun EntryRow(entry: Entry, preview: String, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
-    val preview = remember(entry.body) { Browse.preview(entry.body) }
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text(entry.headword, style = MaterialTheme.typography.titleMedium)
         if (entry.aliases.isNotEmpty()) {
