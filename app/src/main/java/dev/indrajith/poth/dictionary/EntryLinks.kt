@@ -12,10 +12,7 @@ object EntryLinks {
      * links followed backwards. Not one it links to itself, which its own notes already show.
      */
     fun backlinks(entries: List<Entry>): Map<Long, List<Entry>> {
-        val matcher = Matcher(entries.flatMap { entry -> entry.terms.map { it to entry.id } })
-        val linksTo = entries.associate { entry ->
-            entry.id to targets(entry.body).flatMap(matcher::lookup).filter { it != entry.id }.toSet()
-        }
+        val linksTo = links(entries)
         val backlinks = HashMap<Long, MutableList<Entry>>()
         for (from in entries) {
             for (to in linksTo[from.id].orEmpty()) {
@@ -23,6 +20,14 @@ object EntryLinks {
             }
         }
         return backlinks
+    }
+
+    /** For each of [entries], the others among them its notes link to. */
+    fun links(entries: List<Entry>): Map<Long, Set<Long>> {
+        val matcher = Matcher(entries.flatMap { entry -> entry.terms.map { it to entry.id } })
+        return entries.associate { entry ->
+            entry.id to targets(entry.body).flatMap(matcher::lookup).filter { it != entry.id }.toSet()
+        }
     }
 
     /** The entries [notes] link to, as written. */

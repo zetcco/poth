@@ -28,7 +28,7 @@ The pages shown are from *The Hound of the Baskervilles* (public domain), as pub
   word's forms (plurals, -ed, -ing) are suggested, with counts from the book. General words can
   add every form at once; each form is checked against Wiktionary before it's offered.
 - `[[Links]]` between entries, suggested as you type and followed from the entry card. An entry
-  also lists the entries that link to it.
+  also lists the entries that link to it, and a graph shows each shelf's entries and their links.
 - Quick actions send a word, or a prompt made from it, to other apps (search, translation,
   AI assistants).
 - Wiktionary definitions, added to the notes with a tap. Only the word is sent.

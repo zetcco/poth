@@ -180,7 +180,8 @@ private data class CardPage(val entries: List<Entry>, val depth: Int, val previo
  * all the entries it can show. A link in an entry leads on to the entries it names
  * ([onEntryLink]); Back, or the button at the top, goes back through the links followed, and
  * from the first entry closes the card, as a tap above it does. Without [actions] there are no
- * quick actions, and without [onAddAnother] no way to add another meaning.
+ * quick actions, and without [onAddAnother] no way to add another meaning. Not [modal], what is
+ * above the card stays as it is and can still be used.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -195,6 +196,7 @@ fun EntryCard(
     onEdit: (Entry) -> Unit,
     onAddAnother: ((Entry) -> Unit)?,
     onEntryLink: (String) -> Unit,
+    modal: Boolean = true,
 ) {
     val current = entries.filter { it.id in trail.ids }
     val open = current.isNotEmpty()
@@ -207,7 +209,7 @@ fun EntryCard(
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val maxCardHeight = maxHeight * 0.7f
-        AnimatedVisibility(visible = open, enter = quickFadeIn(), exit = quickFadeOut()) {
+        AnimatedVisibility(visible = open && modal, enter = quickFadeIn(), exit = quickFadeOut()) {
             Box(
                 Modifier
                     .fillMaxSize()

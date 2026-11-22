@@ -1,6 +1,7 @@
 package dev.indrajith.poth.ui
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -93,12 +94,14 @@ fun DictionaryScreen(graph: Graph, onBack: () -> Unit) {
     val books by graph.books.all.collectAsStateWithLifecycle()
     val loaded by produceState<Listing?>(null, changes) { value = withContext(Dispatchers.IO) { Listing(dictionary.all()) } }
     val shelves by produceState(emptyList<Shelf>(), shelfChanges) { value = withContext(Dispatchers.IO) { graph.shelves.all() } }
+    val shelfOf by produceState(emptyMap<String, Shelf>(), shelfChanges) { value = withContext(Dispatchers.IO) { graph.shelves.byBook() } }
     val entries = loaded?.entries.orEmpty()
     val previews = loaded?.previews.orEmpty()
     var query by rememberSaveable { mutableStateOf("") }
     val trail = remember { CardTrail() }
     var editing by remember { mutableStateOf<Entry?>(null) }
     var choosingPlace by remember { mutableStateOf(false) }
+    var showingGraph by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     // The keyboard goes before a card or the editor comes up, which it would cover.
     val focus = LocalFocusManager.current
@@ -115,6 +118,21 @@ fun DictionaryScreen(graph: Graph, onBack: () -> Unit) {
             .map { Group(place(it.first()), it) }
             .sortedWith(compareBy({ -it.entries.first().scope.ordinal }, { it.place.lowercase() }))
     }
+    // General words make no web worth drawing: the graph is of each shelf, its books' entries with it.
+    val graphPlaces = remember(entries, shelves, books, shelfOf) {
+        entries
+            .filter { it.scope != Scope.LIBRARY }
+            .groupBy { entry ->
+                if (entry.scope == Scope.SHELF) "shelf:${entry.scopeId}" else shelfOf[entry.scopeId]?.let { "shelf:${it.id}" } ?: "book:${entry.scopeId}"
+            }
+            .map { (key, placed) ->
+                val (kind, id) = key.split(':', limit = 2)
+                val name = if (kind == "shelf") shelves.firstOrNull { it.id.toString() == id }?.name ?: "A shelf" else books.firstOrNull { it.id == id }?.title ?: "A book"
+                GraphPlace(key, name, placed)
+            }
+            .sortedBy { it.name.lowercase() }
+    }
+    BackHandler(enabled = showingGraph && trail.ids.isEmpty() && editing == null) { showingGraph = false }
     val matcher = remember(entries) { Matcher(entries.flatMap { entry -> entry.terms.map { it to entry.id } }) }
     val list = rememberLazyListState()
     val scrolled by remember { derivedStateOf { list.canScrollBackward } }
@@ -122,7 +140,18 @@ fun DictionaryScreen(graph: Graph, onBack: () -> Unit) {
     val barColor by animateColorAsState(if (scrolled) colors.surfaceContainer else colors.surface, label = "bar")
 
     Box(Modifier.fillMaxSize()) {
-        Scaffold(
+        if (showingGraph) {
+            GraphScreen(
+                places = graphPlaces,
+                focused = trail.ids.toSet(),
+                onOpen = { trail.open(listOf(it)) },
+                onClear = { trail.close() },
+                onBack = {
+                    trail.close()
+                    showingGraph = false
+                },
+            )
+        } else Scaffold(
             floatingActionButton = {
                 if (loaded != null) {
                     ExtendedFloatingActionButton(
@@ -142,6 +171,16 @@ fun DictionaryScreen(graph: Graph, onBack: () -> Unit) {
                         title = { Text("Dictionary") },
                         navigationIcon = {
                             IconButton(onClick = onBack) { Icon(painterResource(R.drawable.ic_back), contentDescription = "Back") }
+                        },
+                        actions = {
+                            if (graphPlaces.isNotEmpty()) {
+                                IconButton(
+                                    onClick = {
+                                        focus.clearFocus()
+                                        showingGraph = true
+                                    },
+                                ) { Icon(painterResource(R.drawable.ic_graph), contentDescription = "Graph of links") }
+                            }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                     )
@@ -213,6 +252,8 @@ fun DictionaryScreen(graph: Graph, onBack: () -> Unit) {
                     Toast.makeText(context, "No entry for “$target” yet. Hold the word in a book to write one.", Toast.LENGTH_LONG).show()
                 }
             },
+            // Over the graph, another entry can be tapped while one is open.
+            modal = !showingGraph,
         )
         if (choosingPlace) {
             NewEntrySheet(
